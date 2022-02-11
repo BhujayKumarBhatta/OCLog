@@ -26,10 +26,7 @@ class HDFSLog:
                  labelfilename='anomaly_label.csv',
                  train_ratio=0.8, 
                  split_type='uniform', 
-                 save_train_test_data=False,
-                 padded_seq_len=64,
-                 padded_char_len=256
-                ):
+                 save_train_test_data=False):
         self.logpath = logpath
         self.labelpath = labelpath
         self.logfilename = logfilename
@@ -39,15 +36,12 @@ class HDFSLog:
         self.train_ratio = train_ratio
         self.split_type = split_type
         self.save_train_test_data = save_train_test_data
-        self.padded_seq_len = padded_seq_len
-        self.padded_char_len = padded_char_len
         # self.logs = self.get_log_lines()
         # self.tk = self.train_char_tokenizer()        
         
     def get_train_test_data(self):
         logs = self.get_log_lines()
         tk = self.train_char_tokenizer(logs)
-        print('vocabulary size:' , len(tk.word_index))
         padded_txt_to_num = self.convert_char_to_numbers(logs, tk)
         sequnce_by_blkids = self.group_logs_by_blkids(logs, padded_txt_to_num)
         labelled_log_sequence = self.label_the_blk_sequences(sequnce_by_blkids)
@@ -55,7 +49,7 @@ class HDFSLog:
         y_data = labelled_log_sequence['Label'].values
         x_train, y_train, x_test, y_test = self.train_test_split(x_data, y_data)
         x_train, y_train, x_test, y_test = self.make_equal_len_sequences(x_train, y_train, x_test, y_test)
-        return x_train, y_train, x_test, y_test, tk
+        return x_train, y_train, x_test, y_test
     
     def get_log_lines(self):
         with open(self.logfile, 'r', encoding='utf8') as f:
@@ -72,7 +66,6 @@ class HDFSLog:
         tk.fit_on_texts(logs)
         end_time = time.time()
         print('ending tokenizer training:' , end_time - st_time)
-        print('vocabulary size:' , len(tk.word_index))
         return tk
     
     def convert_char_to_numbers(self, logs, tk):
@@ -84,7 +77,7 @@ class HDFSLog:
         # padded_txt_to_num = pad_sequences(text_to_number, maxlen=256, padding='post')
         # when maxlen is not given, pad_sequences will calculate it automatically
         st_time = time.time()
-        padded_txt_to_num = pad_sequences(text_to_number, maxlen=self.padded_char_len, padding='post')
+        padded_txt_to_num = pad_sequences(text_to_number,maxlen=230, padding='post')
         end_time = time.time()
         print('ending padding characters:' , end_time - st_time)
         print('padded_txt_to_num shape:', padded_txt_to_num.shape) # padded_txt_to_num shape: (11175629, 320)
@@ -152,16 +145,16 @@ class HDFSLog:
         return x_train, y_train, x_test, y_test
         
     def make_equal_len_sequences(self, x_train, y_train, x_test, y_test):
-        for i in range(100, 102):
-            print('length of train  sequence original', len(x_train[i]))            
-        padded_x_train = pad_sequences(x_train, maxlen=self.padded_seq_len, padding='post')  # 57 taken automatically
+        for i in range(100, 120):
+            print(len(x_train[i]))            
+        padded_x_train = pad_sequences(x_train, maxlen=57, padding='post')  # 57 taken automatically
         ##(16838, 57, 230)        
-        for i in range(100, 102):
-            print('length of train sequence original', len(padded_x_train[i]))            
-        padded_x_test = pad_sequences(x_test, maxlen=self.padded_seq_len, padding='post') 
+        for i in range(100, 120):
+            print(len(padded_x_train[i]))            
+        padded_x_test = pad_sequences(x_test, maxlen=57, padding='post') 
         # # # (558223, 57, 230)
-        for i in range(100, 102):
-            print('len of test seq after padding',len(padded_x_test[i]))
+        for i in range(100, 120):
+            print(len(padded_x_test[i]))
         if self.save_train_test_data is True:
             with open('data\padded_train.pkl' , 'wb') as f:
                 pickle.dump((padded_x_train, y_train), f)

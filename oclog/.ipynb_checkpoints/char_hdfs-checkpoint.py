@@ -44,7 +44,7 @@ class HDFSLog:
         # self.logs = self.get_log_lines()
         # self.tk = self.train_char_tokenizer()        
         
-    def get_train_test_data(self):
+    def get_train_test_data(self, ablation=0):
         logs = self.get_log_lines()
         tk = self.train_char_tokenizer(logs)
         print('vocabulary size:' , len(tk.word_index))
@@ -53,7 +53,7 @@ class HDFSLog:
         labelled_log_sequence = self.label_the_blk_sequences(sequnce_by_blkids)
         x_data = labelled_log_sequence['LogSequence'].values
         y_data = labelled_log_sequence['Label'].values
-        x_train, y_train, x_test, y_test = self.train_test_split(x_data, y_data)
+        x_train, y_train, x_test, y_test = self.train_test_split(x_data, y_data, ablation=ablation)
         x_train, y_train, x_test, y_test = self.make_equal_len_sequences(x_train, y_train, x_test, y_test)
         return x_train, y_train, x_test, y_test, tk
     
@@ -90,7 +90,28 @@ class HDFSLog:
         print('padded_txt_to_num shape:', padded_txt_to_num.shape) # padded_txt_to_num shape: (11175629, 320)
         return padded_txt_to_num
     
-    def group_logs_by_blkids(self, logs, padded_txt_to_num):
+    def group_logs_by_blkids(self, logs):
+        data_dict = OrderedDict()
+        st_time = time.time()   
+        for i, line in enumerate(logs):
+           blkId_list = re.findall(r'(blk_-?\d+)', line)
+           blkId_list = list(set(blkId_list))
+           if len(blkId_list) >=2:
+              continue
+           blkId_set = set(blkId_list)
+           for blk_Id in blkId_set:
+             if not blk_Id in data_dict:
+                 data_dict[blk_Id] = []
+             data_dict[blk_Id].append(logs[i])
+             # if i % 100000: print(blk_Id, data_dict[blk_Id])
+             if i % 1000000 == 0: 
+                 print('completed: ', i)
+                 end_time = time.time()
+                 print('ending blk sequencing:' , end_time - st_time)     
+        data_df = pd.DataFrame(list(data_dict.items()), columns=['BlockId', 'LogSequence'])
+        return data_df
+    
+    def group_logs_textx_by_blkids(self, logs, padded_txt_to_num):
         data_dict = OrderedDict()
         st_time = time.time()   
         for i, line in enumerate(logs):
@@ -119,7 +140,7 @@ class HDFSLog:
         data_df['Label'] = data_df['BlockId'].apply(lambda x: 1 if label_dict[x] == 'Anomaly' else 0)
         return data_df
         
-    def train_test_split(self, x_data, y_data=None):
+    def train_test_split(self, x_data, y_data=None, ablation=0):
         (x_data, y_data) = shuffle(x_data, y_data)
         if self.split_type == 'uniform' and y_data is not None:
             pos_idx = y_data > 0
@@ -129,6 +150,10 @@ class HDFSLog:
             y_neg = y_data[~pos_idx]
             train_pos = int(self.train_ratio * x_pos.shape[0])
             train_neg = train_pos
+            if ablation !=0:
+                print(f'getting ablation data: {ablation}')
+                train_pos = ablation
+                train_neg = ablation
             x_train = np.hstack([x_pos[0:train_pos], x_neg[0:train_neg]])
             y_train = np.hstack([y_pos[0:train_pos], y_neg[0:train_neg]])
             x_test = np.hstack([x_pos[train_pos:], x_neg[train_neg:]])

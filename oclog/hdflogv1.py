@@ -12,7 +12,7 @@ from itertools  import groupby
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 
-# from sklearn.utils import shuffle
+from sklearn.utils import shuffle
 
 
 class HDFSLogv1:
@@ -42,8 +42,7 @@ class HDFSLogv1:
         self.logfile = os.path.join(logpath, logfilename)
         self.labelfile = os.path.join(labelpath, labelfilename)
         self.train_ratio = train_ratio
-        self.split_type = split_type
-        self.save_train_test_data = save_train_test_data
+        self.split_type = split_type        
         self.padded_seq_len = padded_seq_len
         self.padded_char_len = padded_char_len
         self.padding_style = padding_style
@@ -55,14 +54,15 @@ class HDFSLogv1:
         self.rm_signs_n_punctuations=rm_signs_n_punctuations
         self.rm_white_space=rm_white_space
         self.logs = None
-        self.tk = None
-        self.padded_txt_to_num = None
+        self.tk = None        
         self.seq_of_log_texts = None
         self.seq_of_log_nums = None
         self.cleaned_logs = None
         self.blkid_to_line_to_num = None
         self.num_sequence_by_blkid = None
         self.labelled_num_seq_df = None
+        self.train_test_data = None
+        self.padded_train_test_data = None
                 
     def get_log_lines(self):
         st_time = time.time()
@@ -205,10 +205,7 @@ class HDFSLogv1:
         print('RAM usage: ', sys.getsizeof(result) )
         return result
     
-    def get_text_sequence_by_blkid(self):
-        pass
-    
-    
+       
     def get_labelled_num_seq_df(self):
         st_time = time.time()
         if self.num_seq_by_blkid_itertools is None:
@@ -224,7 +221,91 @@ class HDFSLogv1:
         print('RAM usage: ', sys.getsizeof(labelled_num_seq_df) )
         return labelled_num_seq_df
         
-                
+    
+    def get_train_test_data(self, ablation=0, shuffle_data=False, save_pkl=False):
+        st_time = time.time()
+        # (x_data, y_data) = shuffle(x_data, y_data)
+        if self.labelled_num_seq_df is None:
+            self.get_labelled_num_seq_df()
+        x_data = self.labelled_num_seq_df['LogNumSequence'].values
+        y_data = self.labelled_num_seq_df['Label'].values
+        if self.split_type == 'uniform' and y_data is not None:
+            pos_idx = y_data > 0
+            x_pos = x_data[pos_idx]
+            y_pos = y_data[pos_idx]
+            x_neg = x_data[~pos_idx]
+            y_neg = y_data[~pos_idx]
+            train_pos = int(self.train_ratio * x_pos.shape[0])
+            train_neg = train_pos
+            if ablation !=0:
+                print(f'getting ablation data: {ablation}')
+                train_pos = ablation
+                train_neg = ablation
+            x_train = np.hstack([x_pos[0:train_pos], x_neg[0:train_neg]])
+            y_train = np.hstack([y_pos[0:train_pos], y_neg[0:train_neg]])
+            x_test = np.hstack([x_pos[train_pos:], x_neg[train_neg:]])
+            y_test = np.hstack([y_pos[train_pos:], y_neg[train_neg:]])
+        elif self.split_type == 'sequential':
+            num_train = int(self.train_ratio * x_data.shape[0])
+            x_train = x_data[0:num_train]
+            x_test = x_data[num_train:]
+            if y_data is None:
+                y_train = None
+                y_test = None
+            else:
+                y_train = y_data[0:num_train]
+                y_test = y_data[num_train:]
+        # Random shuffle
+        if shuffle_data is True:
+            indexes = shuffle(np.arange(x_train.shape[0]))
+            x_train = x_train[indexes]
+            if y_train is not None:
+                y_train = y_train[indexes]
+        print(y_train.sum(), y_test.sum()) # 8419 8419
+        self.train_test_data = x_train, y_train, x_test, y_test
+        end_time = time.time()
+        print('train_test_data done:' , end_time - st_time)
+        # print('padded_txt_to_num shape:', padded_txt_to_num.shape) # padded_txt_to_num shape: (11175629, 320)
+        # self.padded_txt_to_num = padded_txt_to_num
+        print('RAM usage train_test_data: ', sys.getsizeof(self.train_test_data), )
+        if save_pkl is True:
+            with open('data\train.pkl' , 'wb') as f:
+                pickle.dump((x_train, y_train), f)
+            with open('data\test.pkl' , 'wb') as f:
+                pickle.dump((x_test, y_test), f)
+        return x_train, y_train, x_test, y_test
+    
+    
+    def get_padded_train_test_data(self, save_pkl=False):
+        st_time = time.time()
+        if self.train_test_data is None:
+            self.get_train_test_data()
+        x_train, y_train, x_test, y_test = self.train_test_data            
+        for i in range(5):
+            print('length of train  sequence original', len(x_train[i]))            
+        padded_x_train = pad_sequences(x_train, maxlen=self.padded_seq_len, 
+                                       padding=self.padding_style, truncating=self.truncating)  # 57 taken automatically
+        ##(16838, 57, 230)        
+        for i in range(5):
+            print('length of train sequence padded', len(padded_x_train[i]))            
+        padded_x_test = pad_sequences(x_test, maxlen=self.padded_seq_len, 
+                                      padding=self.padding_style, truncating=self.truncating) 
+        # # # (558223, 57, 230)
+        for i in range(5):
+            print('len of test seq after padding',len(padded_x_test[i]))
+        self.padded_train_test_data = padded_x_train, y_train, padded_x_test, y_test
+        end_time = time.time()
+        print('padded_train_test_data done:' , end_time - st_time)        
+        print('RAM usage padded_train_test_data: ', sys.getsizeof(self.padded_train_test_data), )
+        if save_pkl is True:
+            with open('data\padded_train.pkl' , 'wb') as f:
+                pickle.dump((padded_x_train, y_train), f)
+            with open('data\padded_test.pkl' , 'wb') as f:
+                pickle.dump((padded_x_test, y_test), f)
+        return padded_x_train, y_train, padded_x_test, y_test
+
+            
+
 if __name__ == '__main__':
     hdfslogs = HDFSLogv1(padded_seq_len=32,
                          padded_char_len=64,)
@@ -239,7 +320,14 @@ if __name__ == '__main__':
     # print(num_seq_by_blkid_itertools['blk_4258862871822415442'])
     labelled_num_seq_df = hdfslogs.get_labelled_num_seq_df()
     # tk.sequences_to_texts(labelled_num_seq_df['LogNumSequence'][0])
-
+    padded_x_train, y_train, padded_x_test, y_test = hdfslogs.get_padded_train_test_data()
+    padded_train_test_data = padded_x_train, y_train, padded_x_test, y_test
+    with open('data\padded_train_test_data.pkl', 'wb') as f:
+        pickle.dump(padded_train_test_data, f)
+    train_test_data = hdfslogs.train_test_data
+    with open('data\train_test_data.pkl', 'wb') as f:
+        pickle.dump(train_test_data, f)
+        
 
 #################################################################################################
 ########################## correct result

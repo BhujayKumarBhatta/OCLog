@@ -15,9 +15,13 @@ import re
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 
-from sklearn.utils import shuffle
+# from sklearn.utils import shuffle
 
 import tensorflow as tf
+
+
+
+
 
 class HDFSLogGen:
     
@@ -96,9 +100,10 @@ class HDFSLogGen:
 if __name__ == '__main__':
     hdfsdata = HDFSLogGen()    
     logs = hdfsdata.get_sequence_byid_with_label()
+    seq = [v[0] for v in logs.values()]
+    label = [v[1] for v in logs.values()]
+    tflogs = tf.data.Dataset.from_tensor_slices((seq, label))
     
-    logs = tf.data.Dataset.from_tensor_slices(logs)
-        
         
 
         

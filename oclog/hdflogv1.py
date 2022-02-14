@@ -7,6 +7,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from collections import OrderedDict
+from itertools  import groupby
 
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
@@ -60,8 +61,9 @@ class HDFSLogv1:
         self.seq_of_log_nums = None
         self.cleaned_logs = None
         self.blkid_to_line_to_num = None
+        self.num_sequence_by_blkid = None
+        self.labelled_num_seq_df = None
                 
-        
     def get_log_lines(self):
         st_time = time.time()
         with open(self.logfile, 'r', encoding='utf8') as f:
@@ -137,7 +139,6 @@ class HDFSLogv1:
         print('RAM usage: ', sys.getsizeof(self.cleaned_logs) )
         return cleaned_logs_witout_blkid
         
-    
     def train_char_tokenizer(self):
         tk = Tokenizer(num_words=None, char_level=True, oov_token='UNK')
         st_time = time.time()
@@ -176,17 +177,71 @@ class HDFSLogv1:
         self.blkid_to_line_to_num = blkid_to_line_to_num
         return blkid_to_line_to_num
     
+    def get_num_sequence_by_blkid(self):
+        st_time = time.time()
+        if self.blkid_to_line_to_num is None:
+            self.convert_char_to_numbers()
+        od = OrderedDict()
+        for k, v in self.blkid_to_line_to_num:
+            if k not in od:
+                od[k] = []
+            od[k].append(v)
+        self.num_sequence_by_blkid = od
+        end_time = time.time()
+        print('ending num_sequence_by_blkid conversion:' , end_time - st_time)        
+        print('RAM usage: ', sys.getsizeof(blkid_to_line_to_num))
+        return self.num_sequence_by_blkid
     
+    def get_num_seq_by_blkid_itertools(self):
+        st_time = time.time()
+        if self.blkid_to_line_to_num is None:
+            self.convert_char_to_numbers()
+        result = { k : [*map(lambda v: v[1], values)]
+            for k, values in groupby(sorted(self.blkid_to_line_to_num, key=lambda x: x[0]), lambda x: x[0])
+            }
+        self.num_seq_by_blkid_itertools = result
+        end_time = time.time()
+        print('ending num_sequence_by_blkid conversion:' , end_time - st_time)        
+        print('RAM usage: ', sys.getsizeof(result) )
+        return result
+    
+    def get_text_sequence_by_blkid(self):
+        pass
+    
+    
+    def get_labelled_num_seq_df(self):
+        st_time = time.time()
+        if self.num_seq_by_blkid_itertools is None:
+            self.get_num_seq_by_blkid_itertools()
+        labelled_num_seq_df = pd.DataFrame(list(self.num_seq_by_blkid_itertools.items()), columns=['BlockId', 'LogNumSequence'])
+        label_data = pd.read_csv(self.labelfile, engine='c', na_filter=False, memory_map=True)
+        label_data = label_data.set_index('BlockId')
+        label_dict = label_data['Label'].to_dict()
+        labelled_num_seq_df['Label'] = labelled_num_seq_df['BlockId'].apply(lambda x: 1 if label_dict[x] == 'Anomaly' else 0)
+        self.labelled_num_seq_df = labelled_num_seq_df
+        end_time = time.time()
+        print('ending labelled_num_seq_df conversion:' , end_time - st_time) 
+        print('RAM usage: ', sys.getsizeof(labelled_num_seq_df) )
+        return labelled_num_seq_df
+        
                 
 if __name__ == '__main__':
     hdfslogs = HDFSLogv1(padded_seq_len=32,
                          padded_char_len=64,)
     clogs = hdfslogs.get_blkid_n_clean_text()
     tk = hdfslogs.train_char_tokenizer()
-    blkid_to_line_to_num = hdfslogs.convert_char_to_numbers()
+    blkid_to_line_to_num = hdfslogs.convert_char_to_numbers()    
     print(blkid_to_line_to_num[0][1])
-    
-    
+    # num_sequence_by_blkid = hdfslogs.get_num_sequence_by_blkid()
+    # print(num_sequence_by_blkid['blk_4258862871822415442'])
+    # print(len(num_sequence_by_blkid['blk_4258862871822415442']))
+    num_seq_by_blkid_itertools = hdfslogs.get_num_seq_by_blkid_itertools()
+    # print(num_seq_by_blkid_itertools['blk_4258862871822415442'])
+    labelled_num_seq_df = hdfslogs.get_labelled_num_seq_df()
+    # tk.sequences_to_texts(labelled_num_seq_df['LogNumSequence'][0])
+
+
+#################################################################################################
 ########################## correct result
 # print(blkid_to_line_to_num[0][1])
 # [ 4  7 13  3 10  2 11  2  4 23  4  7 24 15 12  3 11 14  8 10 11 19  5  2
@@ -221,4 +276,78 @@ if __name__ == '__main__':
 #         5,  8,  6,  3, 10,  2,  5, 15, 12,  3, 11, 14, 19, 15, 12,  3, 11,
 #        14, 16,  9, 18, 25, 18,  5,  9,  6,  2,  5, 19,  4,  8,  9,  5,  5,
 #         2,  5,  6,  3,  8,  4, 32,  2, 37, 21, 21, 30, 20]))]
+
+
+#############sequence to text checking ###############################
+# labelled_num_seq_df['LogNumSequence'][0]
+# Out[4]: 
+# [array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  4,  7, 24, 15, 12,  3, 11,
+#         14,  8, 10, 11, 19,  5,  2,  8,  6, 19,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  4,  7, 24, 15, 12,  3, 11,
+#         14,  8, 10, 11, 19,  5,  2,  8,  6, 19,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  4,  7, 24, 15, 12,  3, 11,
+#         14,  8, 10, 11, 19,  5,  2,  8,  6, 19,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([10,  3,  3,  6, 10,  9,  7,  5, 20, 29,  6,  2, 16, 18,  3, 10,  9,
+#         10, 28, 29,  6,  9,  8, 14, 29, 33, 17, 17, 20, 21, 21, 21, 17, 21,
+#         17, 33, 26, 29, 17, 17, 21, 36, 29, 16, 29, 17, 17, 21, 33, 22, 21,
+#         29, 17, 18,  9, 10,  6, 40, 17, 21, 33, 22, 21, 27]),
+#  array([ 4,  7, 13,  3, 18,  9, 11, 14,  2,  6, 10,  2,  8, 18,  3,  7,  5,
+#          2, 10, 33, 13,  3, 10, 15, 12,  3, 11, 14,  6,  2, 10, 16,  4,  7,
+#          9,  6,  4,  7, 24,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  2,  5, 15, 12,  3, 11, 14,
+#          3, 13,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21, 13, 10,  3, 16,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 18,  9, 11, 14,  2,  6, 10,  2,  8, 18,  3,  7,  5,
+#          2, 10, 17, 13,  3, 10, 15, 12,  3, 11, 14,  6,  2, 10, 16,  4,  7,
+#          9,  6,  4,  7, 24,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  2,  5, 15, 12,  3, 11, 14,
+#          3, 13,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21, 13, 10,  3, 16,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([14, 31,  7,  9, 16,  2,  8, 28,  8,  6,  2, 16, 27,  9,  5,  5,  8,
+#          6,  3, 10,  2,  5, 15, 12,  3, 11, 14, 19, 15, 12,  3, 11, 14, 16,
+#          9, 18, 25, 18,  5,  9,  6,  2,  5, 19,  4,  8,  9,  5,  5,  2,  5,
+#          6,  3,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21]),
+#  array([14, 31,  7,  9, 16,  2,  8, 28,  8,  6,  2, 16, 27,  9,  5,  5,  8,
+#          6,  3, 10,  2,  5, 15, 12,  3, 11, 14, 19, 15, 12,  3, 11, 14, 16,
+#          9, 18, 25, 18,  5,  9,  6,  2,  5, 19,  4,  8,  9,  5,  5,  2,  5,
+#          6,  3,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21]),
+#  array([14, 31,  7,  9, 16,  2,  8, 28,  8,  6,  2, 16, 27,  9,  5,  5,  8,
+#          6,  3, 10,  2,  5, 15, 12,  3, 11, 14, 19, 15, 12,  3, 11, 14, 16,
+#          9, 18, 25, 18,  5,  9,  6,  2,  5, 19,  4,  8,  9,  5,  5,  2,  5,
+#          6,  3,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21]),
+#  array([ 4,  7, 13,  3, 18,  9, 11, 14,  2,  6, 10,  2,  8, 18,  3,  7,  5,
+#          2, 10, 21, 13,  3, 10, 15, 12,  3, 11, 14,  6,  2, 10, 16,  4,  7,
+#          9,  6,  4,  7, 24,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0]),
+#  array([ 4,  7, 13,  3, 10,  2, 11,  2,  4, 23,  2,  5, 15, 12,  3, 11, 14,
+#          3, 13,  8,  4, 32,  2, 35, 36, 36, 35, 33, 26, 21, 13, 10,  3, 16,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+#          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0])]
+
+# tk.sequences_to_texts(labelled_num_seq_df['LogNumSequence'][0])
+# Out[5]: 
+# ['i n f o r e c e i v i n g b l o c k s r c : d e s t : UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o r e c e i v i n g b l o c k s r c : d e s t : UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o r e c e i v i n g b l o c k s r c : d e s t : UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'r o o t r a n d 8 _ t e m p o r a r y _ t a s k _ 2 0 0 8 1 1 1 0 1 0 2 4 _ 0 0 1 5 _ m _ 0 0 1 2 6 1 _ 0 p a r t - 0 1 2 6 1 .',
+#  'i n f o p a c k e t r e s p o n d e r 2 f o r b l o c k t e r m i n a t i n g UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o r e c e i v e d b l o c k o f s i z e 3 5 5 3 2 4 1 f r o m UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o p a c k e t r e s p o n d e r 0 f o r b l o c k t e r m i n a t i n g UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o r e c e i v e d b l o c k o f s i z e 3 5 5 3 2 4 1 f r o m UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'k * n a m e s y s t e m . a d d s t o r e d b l o c k : b l o c k m a p u p d a t e d : i s a d d e d t o s i z e 3 5 5 3 2 4 1',
+#  'k * n a m e s y s t e m . a d d s t o r e d b l o c k : b l o c k m a p u p d a t e d : i s a d d e d t o s i z e 3 5 5 3 2 4 1',
+#  'k * n a m e s y s t e m . a d d s t o r e d b l o c k : b l o c k m a p u p d a t e d : i s a d d e d t o s i z e 3 5 5 3 2 4 1',
+#  'i n f o p a c k e t r e s p o n d e r 1 f o r b l o c k t e r m i n a t i n g UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK',
+#  'i n f o r e c e i v e d b l o c k o f s i z e 3 5 5 3 2 4 1 f r o m UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK UNK']
+
                  

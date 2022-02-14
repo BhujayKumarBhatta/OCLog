@@ -96,10 +96,12 @@ class HDFSLogGen:
 if __name__ == '__main__':
     hdfsdata = HDFSLogGen()    
     logs = hdfsdata.get_sequence_byid_with_label()
-    
-    logs = tf.data.Dataset.from_tensor_slices(logs)
-        
-        
+    seq = [v[0] for v in logs.values()]
+    label = [v[1] for v in logs.values()]
+
+
+# logdata = tf.data.Dataset.from_tensor_slices(())
+
 
         
     

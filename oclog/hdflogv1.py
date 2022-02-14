@@ -60,6 +60,7 @@ class HDFSLogv1:
         self.cleaned_logs = None
         self.blkid_to_line_to_num = None
         self.num_sequence_by_blkid = None
+        self.num_seq_by_blkid_itertools = None
         self.labelled_num_seq_df = None
         self.train_test_data = None
         self.padded_train_test_data = None
@@ -153,7 +154,7 @@ class HDFSLogv1:
         return tk
     
     def convert_char_to_numbers(self):
-        if tk is None:
+        if self.tk is None:
             self.train_char_tokenizer()
         if self.cleaned_logs is None:
             self.get_blkid_n_clean_text()
@@ -276,9 +277,11 @@ class HDFSLogv1:
         return x_train, y_train, x_test, y_test
     
     
-    def get_padded_train_test_data(self, save_pkl=False):
+    def get_padded_train_test_data(self, save_pkl=False, ablation=0, shuffle_data=False,):
         st_time = time.time()
         if self.train_test_data is None:
+            if ablation !=0:
+                self.get_train_test_data(ablation=ablation)
             self.get_train_test_data()
         x_train, y_train, x_test, y_test = self.train_test_data            
         for i in range(5):

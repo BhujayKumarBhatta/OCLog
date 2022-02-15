@@ -15,7 +15,7 @@ from keras.preprocessing.sequence import pad_sequences
 from sklearn.utils import shuffle
 
 
-class HDFSLogv1:
+class HDFSLogv2:
     
     def __init__(self, logpath='C:\ML_data\Logs', 
                  labelpath='C:\ML_data\Logs',
@@ -257,25 +257,25 @@ class HDFSLogv1:
                 train_neg = ablation
             x_train = np.hstack([x_pos[0:train_pos], x_neg[0:train_neg]])
             y_train = np.hstack([y_pos[0:train_pos], y_neg[0:train_neg]])
-            x_test = np.hstack([x_pos[train_pos:], x_neg[train_neg:]])
-            y_test = np.hstack([y_pos[train_pos:], y_neg[train_neg:]])
-        elif self.split_type == 'sequential':
-            num_train = int(self.train_ratio * x_data.shape[0])
-            x_train = x_data[0:num_train]
-            x_test = x_data[num_train:]
-            if y_data is None:
-                y_train = None
-                y_test = None
+            if x_pos[train_pos:].shape[0] >= train_pos and x_neg[train_neg:].shape[0] >= train_neg:
+                if self.debug:
+                    print(f'total x_test positive: {x_pos[train_pos:].shape[0]}')
+                    print(f'ablation x_test positive: {x_neg[train_neg:2*train_neg].shape[0]}')
+                print(f'ablation x_test positive: {x_pos[train_pos:2*train_pos].shape[0]}')
+                print(f'total x_test negative: {x_neg[train_neg:].shape[0]}')                
+                x_test = np.hstack([x_pos[train_pos:2*train_pos], x_neg[train_neg:2*train_neg]])
+                y_test = np.hstack([y_pos[train_pos:2*train_pos], y_neg[train_neg:2*train_neg]])
             else:
-                y_train = y_data[0:num_train]
-                y_test = y_data[num_train:]
+                x_test = np.hstack([x_pos[train_pos:], x_neg[train_neg:]])
+                y_test = np.hstack([y_pos[train_pos:], y_neg[train_neg:]])
+        
         # Random shuffle
         if shuffle_data is True:
             indexes = shuffle(np.arange(x_train.shape[0]))
             x_train = x_train[indexes]
             if y_train is not None:
                 y_train = y_train[indexes]
-        print(y_train.sum(), y_test.sum()) # 8419 8419
+        print(f'{self.train_ratio} % split ratio of positve class, train:{y_train.sum()}, test:{y_test.sum()}') # 8419 8419
         self.train_test_data = x_train, y_train, x_test, y_test
         end_time = time.time()
         if self.debug:

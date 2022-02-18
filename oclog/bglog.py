@@ -79,6 +79,7 @@ class BGLog:
         self.train_test_categorical = None
         self.tensor_train_test = None
         self.ablation = 28000
+        self.tk_path = os.path.join(self.save_dir, 'bgltk.pkl')
                 
     def get_log_lines(self):
         st_time = time.time()
@@ -204,7 +205,7 @@ class BGLog:
         return num_sequences
     
     def get_padded_num_seq_df(self):
-        st_time = time.time()
+        st_time = time.time()        
         if self.load_from_pkl is True:
             if os.path.exists(self.full_pkl_path):
                 with open(self.full_pkl_path, 'rb') as f:
@@ -212,6 +213,12 @@ class BGLog:
                 print(f'padded_num_seq_df loaded from {self.full_pkl_path}')
             else:
                 print(f'{self.full_pkl_path} not found')
+            if os.path.exists(self.tk_path):
+                with open(self.tk_path, 'rb') as f:
+                  self.tk = pickle.load(f)
+                print(f'trained tokenizer, tk, loaded from {self.tk_path}')
+            else:
+                print(f'{self.tk_path} not found')
         else:
             if self.padded_num_sequences is None:
                 self.get_padded_num_sequences()
@@ -231,8 +238,11 @@ class BGLog:
                     os.mkdir(self.save_dir)                 
                 print(f'trying to save pickle in : {self.full_pkl_path}')
                 with open(self.full_pkl_path , 'wb') as f:
-                    pickle.dump(numdf, f)
+                    pickle.dump(numdf, f)                
+                with open(self.tk_path , 'wb') as f:
+                    pickle.dump(self.tk, f)
                 if os.path.exists(self.full_pkl_path): print(f'saved: {self.full_pkl_path}' )
+                if os.path.exists(self.tk_path): print(f'saved: {self.tk_path}' )
         return self.padded_num_seq_df 
     
     
@@ -323,7 +333,19 @@ class BGLog:
 
     
     
-    
+def get_embedding_layer(log_obj):
+    tk = log_obj.tk
+    vocab_size = len(tk.word_index)
+    print(f'vocab_size: {vocab_size}')
+    char_onehot = vocab_size
+    embedding_weights = []
+    embedding_weights.append(np.zeros(vocab_size))
+    for char, i in tk.word_index.items(): # from 1 to 51
+        onehot = np.zeros(vocab_size)
+        onehot[i-1] = 1
+        embedding_weights.append(onehot)
+    embedding_weights = np.array(embedding_weights)
+    return embedding_weights, vocab_size, char_onehot    
     
         
     

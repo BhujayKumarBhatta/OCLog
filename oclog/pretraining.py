@@ -88,11 +88,11 @@ class LogSeqEncoder(tf.keras.Model):
     
 class LogClassifier(tf.keras.Model):
     
-    def __init__(self,  **kwargs):
+    def __init__(self,  num_classes, line_encoder, seq_encoder, **kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
-        self.log_line_encoder = LogLineEncoder()
-        self.log_seq_encoder = LogSeqEncoder()
+        self.log_line_encoder = line_encoder
+        self.log_seq_encoder = seq_encoder
         self.classifier = tf.keras.layers.Dense(
             self.num_classes, activation='softmax') #TODO done: make this varaible
 #         self.extract_feature = extract_feature

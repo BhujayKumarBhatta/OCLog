@@ -8,13 +8,19 @@ import numpy as np
 import tensorflow as tf
 tf.random.set_seed(123)
 
-def euclidean_metric(a, b):
-    a = np.expand_dims(a, 1)
-    b = np.expand_dims(b, 0)
-#     logits = -((a - b)**2).sum(dim=2)
-    logits = np.sum(-np.square(a - b), axis=2)
-    return logits 
+# def euclidean_metric(a, b):
+#     a = np.expand_dims(a, 1)
+#     b = np.expand_dims(b, 0)
+# #     logits = -((a - b)**2).sum(dim=2)
+#     logits = np.sum(-np.square(a - b), axis=2)
+#     return logits 
 
+def euclidean_metric(a, b):
+    a = tf.expand_dims(a, 1)
+    b = tf.expand_dims(b, 0)
+#     logits = -((a - b)**2).sum(dim=2)
+    logits = tf.math.reduce_sum(-tf.math.square(a - b), axis=2)
+    return logits
 
 
 class BoundaryLoss(tf.keras.layers.Layer):
@@ -41,17 +47,20 @@ class BoundaryLoss(tf.keras.layers.Layer):
         ############################
         # delta =  log(1 + e ^ delta_k) , delta_k =self.delta = parameters for the boundary
         delta = tf.nn.softplus(self.delta)  
-        label_indexs = np.argmax(label_batch, axis=1)
+        delta = tf.Variable(delta)
+        label_indexs = tf.math.argmax(labels, axis=1)
         # centroids are having only 4 rows , whereas labels are rows equivallent to batch
         # pick-up the centroid for each class 
         # label_index from the data set will have all the classes, 32 for a batch
         # for each class cetroid[class_index] will give the centroid of the calss
         # it is basically : [centroids[class_idx] for class_idx in label_indexes]
-        c = centroids[label_indexs]
+#         c = centroids[label_indexs]
+        c = tf.gather(centroids, indices=label_indexs)
         # similarly get the delta for each class, 
         # although delta is now randomly intialized 
         # delta parameters will be learned through the training
-        d = delta[label_indexs]
+#         d = delta[label_indexs]
+        d = tf.gather(delta, indices=label_indexs)
         x = features
         # x-c = vector of (32, 16) dimension , euc_dis  = scalar value
         euc_dis = tf.norm(x - c, ord='euclidean', axis=1)        
@@ -59,13 +68,14 @@ class BoundaryLoss(tf.keras.layers.Layer):
         ## single vector norm is computed over the entire set of values in the tensor, 
         ## i.e. norm(tensor, ord=ord) is equivalent to norm(reshape(tensor, [-1]), ord=ord). 
         ##If axis is a Python integer, the input is considered a batch of vectors, and axis determines the axis in tensor over which to compute vector norms.
-        pos_mask = tf.dtypes.cast(euc_dis > d, tf.int32)
-        neg_mask = tf.dtypes.cast(euc_dis < d, tf.int32)
+        pos_mask = tf.dtypes.cast(euc_dis > d, tf.float32)
+        neg_mask = tf.dtypes.cast(euc_dis < d, tf.float32)
         # euc_dis > d should be ==>1 and euc_dis <= d should be ==>0
         # but the expression here will it retrun True , False or 1 and 0. 
         pos_loss = (euc_dis - d) * pos_mask
         neg_loss = (d - euc_dis) * neg_mask
-        loss = pos_loss.mean() + neg_loss.mean()
+#         loss = pos_loss.mean() + neg_loss.mean()
+        loss = tf.reduce_mean(pos_loss, axis=1) + tf.reduce_mean(neg_loss, axis=1)
         
         return loss, delta
     

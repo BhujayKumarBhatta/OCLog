@@ -270,7 +270,7 @@ class HDFSLog:
                 y_test = y_data[num_train:]
         # Random shuffle
         # indexes = shuffle(np.arange(x_train.shape[0]))
-        x_train = x_train[indexes]
+#         x_train = x_train[indexes]
         if y_train is not None:
             y_train = y_train[indexes]
         print(y_train.sum(), y_test.sum()) # 8419 8419

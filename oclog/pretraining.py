@@ -8,7 +8,7 @@ Created on Sun Feb 13 21:24:31 2022
 import numpy as np
 import tensorflow as tf
 tf.random.set_seed(123)
-from bglog import  get_embedding_layer
+from BGL.bglog import  get_embedding_layer
 # from bglog import BGLog, get_embedding_layer
 # bglog = BGLog(save_padded_num_sequences=False, load_from_pkl=True)
 # train_test = bglog.get_tensor_train_test(ablation=1000)

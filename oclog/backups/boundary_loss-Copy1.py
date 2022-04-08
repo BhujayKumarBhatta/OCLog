@@ -31,23 +31,23 @@ class BoundaryLoss(tf.keras.layers.Layer):
         self.feat_dim = feat_dim
         # initializing the delta boundary (4,1 shape is for 4 classes 4 number of scaler value)
         w_init = tf.random_normal_initializer()
-        self.theta = tf.Variable(
+        self.delta = tf.Variable(
                             initial_value=w_init(shape=(self.num_labels, 1), dtype='float32'),
                             trainable=True,
                         )
         
     def call(self, features, centroids, labels):
-#         logits =  euclidean_metric(features, centroids)  
-#         ######### Why softmax before softplus#########
-#         smax = tf.nn.softmax(logits, )
-#         # this is equivallent to predicting the feature belong to which class
-#         preds = tf.math.argmax(smax, axis=1)
-#         # This is equivallent to obtaining the max probabiliy of a feature belonging to a calss
-#         probs = tf.reduce_max(smax, 1)        
-#         ############################
+        logits =  euclidean_metric(features, centroids)  
+        ######### Why softmax before softplus#########
+        smax = tf.nn.softmax(logits, )
+        # this is equivallent to predicting the feature belong to which class
+        preds = tf.math.argmax(smax, axis=1)
+        # This is equivallent to obtaining the max probabiliy of a feature belonging to a calss
+        probs = tf.reduce_max(smax, 1)        
+        ############################
         # delta =  log(1 + e ^ delta_k) , delta_k =self.delta = parameters for the boundary
-        radius = tf.nn.softplus(self.theta)  
-        radius = tf.Variable(radius)
+        delta = tf.nn.softplus(self.delta)  
+        delta = tf.Variable(delta)
         label_indexs = tf.math.argmax(labels, axis=1)
         # centroids are having only 4 rows , whereas labels are rows equivallent to batch
         # pick-up the centroid for each class 
@@ -60,7 +60,7 @@ class BoundaryLoss(tf.keras.layers.Layer):
         # although delta is now randomly intialized 
         # delta parameters will be learned through the training
 #         d = delta[label_indexs]
-        r = tf.gather(radius, indices=label_indexs)
+        d = tf.gather(delta, indices=label_indexs)
         x = features
         # x-c = vector of (32, 16) dimension , euc_dis  = scalar value
         euc_dis = tf.norm(x - c, ord='euclidean', axis=1)        
@@ -68,17 +68,16 @@ class BoundaryLoss(tf.keras.layers.Layer):
         ## single vector norm is computed over the entire set of values in the tensor, 
         ## i.e. norm(tensor, ord=ord) is equivalent to norm(reshape(tensor, [-1]), ord=ord). 
         ##If axis is a Python integer, the input is considered a batch of vectors, and axis determines the axis in tensor over which to compute vector norms.
-        pos_mask = tf.dtypes.cast(euc_dis > r, tf.float32)
-        neg_mask = tf.dtypes.cast(euc_dis < r, tf.float32)
+        pos_mask = tf.dtypes.cast(euc_dis > d, tf.float32)
+        neg_mask = tf.dtypes.cast(euc_dis < d, tf.float32)
         # euc_dis > d should be ==>1 and euc_dis <= d should be ==>0
         # but the expression here will it retrun True , False or 1 and 0. 
-        pos_loss = (euc_dis - r) * pos_mask
-        neg_loss = (r - euc_dis) * neg_mask
+        pos_loss = (euc_dis - d) * pos_mask
+        neg_loss = (d - euc_dis) * neg_mask
 #         loss = pos_loss.mean() + neg_loss.mean()
-#         loss = tf.reduce_mean(pos_loss, axis=1) + tf.reduce_mean(neg_loss, axis=1)
-        loss = tf.reduce_mean(pos_loss) + tf.reduce_mean(neg_loss)
+        loss = tf.reduce_mean(pos_loss, axis=1) + tf.reduce_mean(neg_loss, axis=1)
         
-        return loss, radius
+        return loss, delta
     
     
     

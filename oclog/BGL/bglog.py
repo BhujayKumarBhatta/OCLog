@@ -71,7 +71,9 @@ class BGLog:
         self.load_from_pkl=load_from_pkl
         self.save_dir = save_dir
         self.pkl_file = pkl_file
-        self.full_pkl_path = os.path.join(self.save_dir, self.pkl_file)
+        #self.full_pkl_path = os.path.join(self.save_dir, self.pkl_file)
+        self.full_pkl_path = os.path.join(os.path.dirname(__file__), self.save_dir, self.pkl_file)
+        #print('full_pkl_path', self.full_pkl_path)
         self.classes = classes
         self.train_df = None
         self.test_df = None   
@@ -79,7 +81,8 @@ class BGLog:
         self.train_test_categorical = None
         self.tensor_train_test = None
         self.ablation = 28000
-        self.tk_path = os.path.join(self.save_dir, 'bgltk.pkl')
+#         self.tk_path = os.path.join(self.save_dir, 'bgltk.pkl')
+        self.tk_path = os.path.join(os.path.dirname(__file__), self.save_dir, 'bgltk.pkl')
                 
     def get_log_lines(self):
         st_time = time.time()

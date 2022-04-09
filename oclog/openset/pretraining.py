@@ -8,7 +8,7 @@ Created on Sun Feb 13 21:24:31 2022
 import numpy as np
 import tensorflow as tf
 tf.random.set_seed(123)
-from BGL.bglog import  get_embedding_layer
+from oclog.BGL.bglog import  get_embedding_layer
 # from bglog import BGLog, get_embedding_layer
 # bglog = BGLog(save_padded_num_sequences=False, load_from_pkl=True)
 # train_test = bglog.get_tensor_train_test(ablation=1000)
@@ -60,7 +60,11 @@ class LogSeqEncoder(tf.keras.Model):
                  dense_neurons=16, dense_activation='relu',):
         super().__init__()
         self.line_in_seq = line_in_seq
-        self.num_of_conv1d = num_of_conv1d
+#         if num_of_conv1d == 1:
+#             self.num_of_conv1d = num_of_conv1d
+#         else:
+#             self.num_of_conv1d = num_of_conv1d -1
+        self.num_of_conv1d = num_of_conv1d -1
         self.dense_neurons = dense_neurons
         self.filters = filters
         self.kernel_size = kernel_size
@@ -76,9 +80,12 @@ class LogSeqEncoder(tf.keras.Model):
                                            activation=self.dense_activation)
        
         
-    def call(self, inputs):       
-        for conv1d_layer in self.conv1d_layers:
-            x = conv1d_layer(inputs)
+    def call(self, inputs):
+        conv1d_layer = self.conv1d_layers.pop(0)
+        x = conv1d_layer(inputs)
+        if self.conv1d_layers:
+            for conv1d_layer in self.conv1d_layers:
+                x = conv1d_layer(x)
         x = self.maxpool1d(x)        
         x = tf.reshape(x, (inputs.shape[0], self.filters)) 
         x = self.Dense(x)
@@ -95,8 +102,8 @@ class LogClassifier(tf.keras.Model):
         self.log_seq_encoder = seq_encoder
         self.classifier = tf.keras.layers.Dense(
             self.num_classes, activation='softmax') #TODO done: make this varaible
-#         self.extract_feature = extract_feature
-    
+
+    @tf.function
     def call(self, inputs, extract_feature=False,):
 #         x_data, y_data = inputs
         x = self.log_line_encoder(inputs)
@@ -108,4 +115,25 @@ class LogClassifier(tf.keras.Model):
             output = self.classifier(seq_embedding)
         return output
     
+    @tf.function
+    def train_step(self, data):
+        # Unpack the data. Its structure depends on your model and
+        # on what you pass to `fit()`.
+        x, y = data
+
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)  # Forward pass
+            # Compute the loss value
+            # (the loss function is configured in `compile()`)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+
+        # Compute gradients
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(loss, trainable_vars)
+        # Update weights
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        # Update metrics (includes the metric that tracks the loss)
+        self.compiled_metrics.update_state(y, y_pred)
+        # Return a dict mapping metric names to current value
+        return {m.name: m.result() for m in self.metrics}
 

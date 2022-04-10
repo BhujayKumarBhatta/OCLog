@@ -106,7 +106,7 @@ class OpenSet:
         centroids /= total_label_reshaped
         return centroids  
 
-    def openpredict(self, features):
+    def openpredict(self, features, debug=True):
         logits = euclidean_metric(features, self.centroids)
         ####original line in pytorch ###probs, preds = F.softmax(logits.detach(), dim = 1).max(dim = 1)
         smax = tf.nn.softmax(logits, )
@@ -114,36 +114,40 @@ class OpenSet:
         probs = tf.reduce_max(smax, 1)            
         #######euc_dis = torch.norm(features - self.centroids[preds], 2, 1).view(-1)
         pred_centroids = tf.gather(self.centroids, indices=preds)
-        euc_dis = tf.norm(features - pred_centroids, ord='euclidean', axis=1)
-        print('euc_dis:',euc_dis)
+        euc_dis = tf.norm(features - pred_centroids, ord='euclidean', axis=1)        
         pred_radius = tf.gather(self.radius, indices=preds)
-        pred_radius = tf.reshape(pred_radius, pred_radius.shape[0], )        
-        print('pred_radius:',pred_radius)
+        pred_radius = tf.reshape(pred_radius, pred_radius.shape[0], )
         #####preds[euc_dis >= self.delta[preds]] = data.unseen_token_id
         unknown_filter = euc_dis >= pred_radius
         #convert to numpy since tensor is immutable
         unknown_filter_np = unknown_filter.numpy()
         preds_np = preds.numpy()
-        preds_np[unknown_filter_np]=9999        
-        print('predictions with unknown-9999:', preds_np)
+        preds_np[unknown_filter_np]=9999  
+        if debug:
+            print('euc_dis:',euc_dis)
+            print('pred_radius:',pred_radius)
+            print('predictions with unknown-9999:', preds_np)
         return preds_np
     
-    def evaluate(self, data):
+    def evaluate(self, data, debug=True):
         total_preds, total_labels = [], []
         for batch in tqdm(data):
             logseq_batch, label_batch = batch
             features_batch = self.get_pretrained_features(logseq_batch)
-            preds_np = self.openpredict(features_batch)            
+            preds_np = self.openpredict(features_batch, debug=False)            
             label_indexs = tf.math.argmax(label_batch, axis=1)
-            label_index_np = label_index.numpy()
+            label_index_np = label_indexs.numpy()
             total_preds.append(preds_np)
             total_labels.append(label_index_np)
         y_pred = np.array(total_preds).flatten().tolist()
         y_true = np.array(total_labels).flatten().tolist()
         cm = confusion_matrix(y_true, y_pred)
         acc = round(accuracy_score(y_true, y_pred) * 100, 2)
-        f1 = f1_score(y_true, y_pred)
-        return cm, acc, f1
+        # f1 = f1_score(y_true, y_pred)
+        if debug:
+            print(cm)
+            print(acc)
+        return y_true, y_pred
     
     def plot_radius_chages(self):
         narr = np.array([elem.numpy() for elem in self.radius_changes])

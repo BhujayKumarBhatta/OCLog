@@ -52,13 +52,13 @@ class OpenSet:
     def train_step(self, Lfunction, logseq_batch, label_batch, optimizer):       
         with tf.GradientTape() as tape:                
             #features_batch = self.model(logseq_batch, extract_feature=True)
-            features_batch = self.get_pretrained_features()
+            features_batch = self.get_pretrained_features(logseq_batch)
             loss, self.radius = Lfunction(features_batch, self.centroids, label_batch)        
             gradients = tape.gradient(loss, [self.radius])
             optimizer.apply_gradients(zip(gradients, [self.radius]))
         return loss, self.radius                   
         
-    def get_pretrained_features(self):
+    def get_pretrained_features(self, logseq_batch):
         if self.function_model is True:
             penultimate_layer = self.pretrained_model.layers[len(self.pretrained_model.layers) -2]
 #             features = penultimate_layer.output
@@ -73,7 +73,7 @@ class OpenSet:
         for batch in data:
             logseq_batch, label_batch = batch
             ## (32, 32, 64), (32, 4)
-            features = self.get_pretrained_features()
+            features = self.get_pretrained_features(logseq_batch)
             ## (32, 16) features - 32 sequence of line each haaving 64 characrers
             ## produces a feaure vector of dimension 16. 
             for i in range(len(label_batch)): # (32, 4) --> here length is 32

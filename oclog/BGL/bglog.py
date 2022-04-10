@@ -11,7 +11,8 @@ from itertools  import groupby
 import tensorflow as tf
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-from keras.utils import to_categorical
+# from keras.utils import to_categorical
+from tensorflow.keras.utils import to_categorical
 
 from sklearn.utils import shuffle
 import random

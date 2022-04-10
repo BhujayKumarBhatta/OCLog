@@ -124,8 +124,11 @@ class OpenSet:
         return preds
     
     def evaluate(self, data):
-        pass
+        for batch in tqdm(data):
+            pass
+            
         
+    
     def plot_radius_chages(self):
         narr = np.array([elem.numpy() for elem in self.radius_changes])
         tnsr = tf.convert_to_tensor(narr)        
@@ -144,3 +147,4 @@ class OpenSet:
         fig2.set_xlabel("Epochs")
         fig2.set_ylabel("Loss")
         plt.show()
+        

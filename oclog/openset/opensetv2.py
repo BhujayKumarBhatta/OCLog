@@ -14,6 +14,7 @@ tf.random.set_seed(123)
 from oclog.openset.boundary_loss import euclidean_metric, BoundaryLoss
 from tqdm import trange, tqdm, tnrange
 # from time import sleep
+from sklearn.metrics import confusion_matrix, f1_score, accuracy_score
 
 class OpenSet:
     ''' 
@@ -52,9 +53,10 @@ class OpenSet:
             self.radius_changes.append(self.radius)
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
-#             loss = tf.reshape(loss, loss.shape[0])
             print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}' )
-            
+        self.plot_radius_chages()
+        return self.losses, self.radius_changes
+    
             
     def train_step(self, Lfunction, logseq_batch, label_batch, optimizer):       
         with tf.GradientTape() as tape:                
@@ -118,16 +120,30 @@ class OpenSet:
         pred_radius = tf.reshape(pred_radius, pred_radius.shape[0], )        
         print('pred_radius:',pred_radius)
         #####preds[euc_dis >= self.delta[preds]] = data.unseen_token_id
-        unknowns = euc_dis >= pred_radius
-#         preds[unknowns] = 0000
-        print('unknowns:', unknowns)
-        return preds
+        unknown_filter = euc_dis >= pred_radius
+        #convert to numpy since tensor is immutable
+        unknown_filter_np = unknown_filter.numpy()
+        preds_np = preds.numpy()
+        preds_np[unknown_filter_np]=9999        
+        print('predictions with unknown-9999:', preds_np)
+        return preds_np
     
     def evaluate(self, data):
+        total_preds, total_labels = [], []
         for batch in tqdm(data):
-            pass
-            
-        
+            logseq_batch, label_batch = batch
+            features_batch = self.get_pretrained_features(logseq_batch)
+            preds_np = self.openpredict(features_batch)            
+            label_indexs = tf.math.argmax(label_batch, axis=1)
+            label_index_np = label_index.numpy()
+            total_preds.append(preds_np)
+            total_labels.append(label_index_np)
+        y_pred = np.array(total_preds).flatten().tolist()
+        y_true = np.array(total_labels).flatten().tolist()
+        cm = confusion_matrix(y_true, y_pred)
+        acc = round(accuracy_score(y_true, y_pred) * 100, 2)
+        f1 = f1_score(y_true, y_pred)
+        return cm, acc, f1
     
     def plot_radius_chages(self):
         narr = np.array([elem.numpy() for elem in self.radius_changes])

@@ -25,8 +25,8 @@ class BGLog:
                  labelpath='C:\ML_data\Logs',              
                  logfilename='BGL.log',
                  train_ratio=0.8,
-                 val_ratio = None
-                 test_ratio = None
+                 val_ratio = None,
+                 test_ratio = None,
                  save_train_test_data=False,
                  seq_len=32,
                  padded_seq_len=32,
@@ -42,7 +42,7 @@ class BGLog:
                  save_padded_num_sequences=False,
                  load_from_pkl=False,
                  save_dir='data',
-                 pkl_file='bgl_openset.pkl',
+                 pkl_file='bgl_ukc.pkl',
                  classes=['0', '1', '2', '3','4', '5', '6', ],
                  batch_size=32,                 
                 ):
@@ -83,11 +83,11 @@ class BGLog:
         self.ukc_df = None
         self.batch_size = batch_size
         self.train_test_categorical = None
-        self.tensor_train_test = None
+        self.tensor_train_val_test = None
         self.ablation = 28000
         self.ukc_cnt = self.ablation
 #         self.tk_path = os.path.join(self.save_dir, 'bgltk.pkl')
-        self.tk_path = os.path.join(os.path.dirname(__file__), self.save_dir, 'bgltk.pkl')
+        self.tk_path = os.path.join(os.path.dirname(__file__), self.save_dir, 'bgltkukc.pkl')
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
                 
@@ -268,7 +268,7 @@ class BGLog:
         if self.debug: print(f'ablation set to : {self.ablation}')
         train_cnt = round(self.ablation * self.train_ratio)#### 1000 * 0.7 = 700
         remaining_cnt = round(self.ablation *(1 - self.train_ratio)) ### 1000 * (1-0.7) = 300 
-        if val_cnt is None and test_cnt is None:
+        if self.val_ratio is None and self.test_ratio is None:
             val_cnt = test_cnt = remaining_cnt//2 ### 300/2 = 150 each
         else:
             val_cnt = round(self.ablation * self.val_ratio) ### 1000 * 0.2 = 200 
@@ -290,18 +290,21 @@ class BGLog:
             else: ### cls_data_cnt = 850 or 900
                 val_data = cls_data[train_cnt:cls_data_cnt] ### cls_data[700:850]
         else:
-            print(f'{cls_data_cnt} data in class {label} not enough to split into train:{train_cnt} and validation:{val_cnt}')
+            if self.debug:
+                print(f'{cls_data_cnt} data in class {label} not enough to split into train:{train_cnt} and validation:{val_cnt}')
             if cls_data_cnt < test_cnt:
                 ukc_data = cls_data[0:cls_data_cnt]
             else:
                 ukc_data = cls_data[0:test_cnt]
-            
-        if train_data is not None:
-            print(f'train_{label}:, {train_data.count()[0]}')
-        if val_data is not None:
-            print(f'val_{label}:, {val_data.count()[0]}')
-        if test_data is not None:
-            print(f'test_{label}:, {test_data.count()[0]}')
+        if self.debug:    
+            if train_data is not None:
+                print(f'train_{label}:, {train_data.count()[0]}')
+            if val_data is not None:
+                print(f'val_{label}:, {val_data.count()[0]}')
+            if test_data is not None:
+                print(f'test_{label}:, {test_data.count()[0]}')
+            if ukc_data is not None:
+                print(f'ukc_{label}:, {ukc_data.count()[0]}')
         return train_data, val_data,test_data, ukc_data
     
     
@@ -324,11 +327,14 @@ class BGLog:
         self.ukc_df = pd.concat(ukc_data)
         ukc_num = self.ukc_df.count()[0]
         if ukc_num >= self.ukc_cnt:
-            ukc_to_add = self.ukc[0:self.ukc_cnt]
+            ukc_to_add = self.ukc_df[0:self.ukc_cnt]
         else:
-            ukc_to_add = self.ukc[0:ukc_num]
-        self.test_df = pd.concat(ukc_to_add)
-        if self.debug: print(self.train_df.label.value_counts())
+            ukc_to_add = self.ukc_df[0:ukc_num]        
+        self.test_df = pd.concat([self.test_df, ukc_to_add])
+        if self.debug: 
+            print(self.train_df.label.value_counts())
+            print(self.val_df.label.value_counts())
+            print(self.test_df.label.value_counts())
         return self.train_df, self.val_df, self.test_df  
     
     
@@ -336,20 +342,29 @@ class BGLog:
         if self.train_df is None or self.test_df is None:
             self.get_train_test_multi_class()
         x_train = list(self.train_df.seq.values)
-        y_train = list(self.train_df.label.values)
+        y_train = list(self.train_df.label.values)        
         y_train = to_categorical(y_train)
         print(y_train[:2])
-        x_test = list(self.test_df.seq.values)
+        x_val = list(self.val_df.seq.values)
+        y_val = list(self.val_df.label.values)
+        y_val = to_categorical(y_val)
+        # print(y_val[:2])
+        x_test = list(self.test_df.seq.values)     
         y_test = list(self.test_df.label.values)
+        unique_label_train = np.unique(self.train_df.label)
+        max_label_num_train = max(unique_label_train)
+        ukc_label = str(int(max_label_num_train)+1)
+        self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=ukc_label
         y_test = to_categorical(y_test)
         if self.debug:
+            print('test df', self.test_df.label.value_counts())
             print(y_test[:2])
             print(y_train[80:82])
-        self.train_test_categorical = x_train, y_train, x_test, y_test
+        self.train_test_categorical = x_train, y_train, x_val, y_val, x_test, y_test
         return self.train_test_categorical
     
     
-    def get_tensor_train_test(self, ablation=None, ukc_cnt=None):
+    def get_tensor_train_val_test(self, ablation=None, ukc_cnt=None):
         if ablation is None: 
             ablation = self.ablation
         else:
@@ -357,18 +372,21 @@ class BGLog:
         if self.train_test_categorical is None:
             self.get_train_test_categorical()
         B = self.batch_size
-        x_train, y_train, x_test, y_test = self.train_test_categorical
+        x_train, y_train, x_val, y_val, x_test, y_test = self.train_test_categorical
         train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         train_data = train_data.shuffle(buffer_size=y_train.shape[0]).batch(B, drop_remainder=True)
         print(train_data)
+        val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+        val_data = val_data.shuffle(buffer_size=y_val.shape[0]).batch(B, drop_remainder=True)
+        print(val_data)
         test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
         test_data = test_data.shuffle(buffer_size=y_test.shape[0]).batch(B, drop_remainder=True)
         print(test_data)
         if self.debug:            
             print(train_data.element_spec[0].shape[2])
             print(train_data.element_spec[1].shape[1])
-        self.tensor_train_test = train_data, test_data
-        return self.tensor_train_test
+        self.tensor_train_val_test = train_data, val_data, test_data
+        return self.tensor_train_val_test
 
     
     

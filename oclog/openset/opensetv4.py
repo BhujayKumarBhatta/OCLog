@@ -38,6 +38,7 @@ class OpenSet:
         self.pred_radius = None
         self.unknown = None
         self.best_eval_score = 0
+        self.ukc_label = 999
     
     def train(self, data_train, lr_rate=0.05, epochs=1, wait_patient=3):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)       
@@ -139,14 +140,19 @@ class OpenSet:
         #convert to numpy since tensor is immutable
         unknown_filter_np = unknown_filter.numpy()
         preds_np = preds.numpy()
-        preds_np[unknown_filter_np]=9999  
+        preds_np[unknown_filter_np]=self.ukc_label  
         if debug:
             print('euc_dis:',euc_dis)
             print('pred_radius:',pred_radius)
-            print('predictions with unknown-9999:', preds_np)
+            print(f'predictions with ukc_label={self.ukc_label}', preds_np)
         return preds_np
     
-    def evaluate(self, data, debug=True, zero_div=1):
+    def evaluate(self, data, debug=True, zero_div=1, ukc_label=None):
+        # if hasattr(data, ukc_label)
+        if ukc_label is None:
+            ukc_label = self.ukc_label
+        else:
+            self.ukc_label = ukc_label
         total_preds, total_labels = [], []
         for batch in data:
             logseq_batch, label_batch = batch

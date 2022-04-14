@@ -283,7 +283,7 @@ class BGLog:
                 ukc_data = cls_data[0:cls_data_cnt]
             else:
                 ukc_data = cls_data[0:test_cnt]
-            print(f'class {cls_unique_label} is add as ukc')
+            print(f'class {cls_unique_label} is added as ukc')
         else:
             if self.ablation <= cls_data_cnt: ### if 1000 <= 2000            
                 train_data = cls_data[0:train_cnt] ### cls_data[0:700]
@@ -305,15 +305,15 @@ class BGLog:
                         ukc_data = cls_data[0:cls_data_cnt]
                     else:
                         ukc_data = cls_data[0:test_cnt]
-        if self.debug:    
-            if train_data is not None:
-                print(f'train_{label}:, {train_data.count()[0]}')
-            if val_data is not None:
-                print(f'val_{label}:, {val_data.count()[0]}')
-            if test_data is not None:
-                print(f'test_{label}:, {test_data.count()[0]}')
-            if ukc_data is not None:
-                print(f'ukc_{label}:, {ukc_data.count()[0]}')
+        # if self.debug:    
+        if train_data is not None:
+            print(f'train_{label}:, {train_data.count()[0]}')
+        if val_data is not None:
+            print(f'val_{label}:, {val_data.count()[0]}')
+        if test_data is not None:
+            print(f'test_{label}:, {test_data.count()[0]}')
+        if ukc_data is not None:
+            print(f'ukc_{label}:, {ukc_data.count()[0]}')
         return train_data, val_data,test_data, ukc_data
     
     

@@ -44,7 +44,7 @@ class BGLog:
                  save_dir='data',
                  pkl_file='bgl_ukc.pkl',
                  classes=['0', '1', '2', '3','4', '5', '6', ],
-                 batch_size=32,                 
+                 batch_size=32,                
                 ):
         self.logpath = logpath
         self.labelpath = labelpath
@@ -90,6 +90,7 @@ class BGLog:
         self.tk_path = os.path.join(os.path.dirname(__file__), self.save_dir, 'bgltkukc.pkl')
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
+        self.designated_ukc_cls = None
                 
     def get_log_lines(self):
         st_time = time.time()
@@ -133,7 +134,7 @@ class BGLog:
         self.labelled_txt_sequence = labelled_sequences
         if self.debug: 
             print(f'elapsed time: {etime - stime}')
-            print('self.labelled_txt_sequence:', self.labelled_txt_sequence[0] )
+            #print('self.labelled_txt_sequence:', self.labelled_txt_sequence[0] )
         return labelled_sequences
     
     def clean_bgl(self, txt_line, clean_part_1=True, clean_part_2=True, clean_time_1=True, clean_part_4=True, clean_time_2=True, clean_part_6=True):
@@ -263,9 +264,8 @@ class BGLog:
         train_data = None
         val_data = None
         test_data = None
-        ukc_data = None ### unknown known - not present in the training data but present in the test data
+        ukc_data = None ### unknown known - not present in the training data but present in the test data        
         
-        if self.debug: print(f'ablation set to : {self.ablation}')
         train_cnt = round(self.ablation * self.train_ratio)#### 1000 * 0.7 = 700
         remaining_cnt = round(self.ablation *(1 - self.train_ratio)) ### 1000 * (1-0.7) = 300 
         if self.val_ratio is None and self.test_ratio is None:
@@ -275,27 +275,36 @@ class BGLog:
             test_cnt = round(self.ablation * self.test_ratio) ### 1000 * 0.1 = 100
         
         cls_data = bgldf[bgldf.label==label]
-        cls_data_cnt = cls_data.count()[0] 
-        
-        if self.ablation <= cls_data_cnt: ### if 1000 <= 2000          
-            train_data = cls_data[0:train_cnt] ### cls_data[0:700]
-            val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
-            test_data = cls_data[train_cnt+val_cnt:self.ablation] ### cls_data[900:1000]
-        elif self.ablation > cls_data_cnt and cls_data_cnt >= train_cnt+val_cnt: ### 1000>950 and 950>(700+200)
-            train_data = cls_data[0:train_cnt] ### cls_data[0:700]
-            remaining_for_test = cls_data_cnt - (train_cnt+val_cnt) ### 950 - (700+200) = 50
-            if remaining_for_test > 0: ### 50 > 0
-                val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
-                test_data = cls_data[train_cnt+val_cnt:cls_data_cnt] ### cls_data[900:950]
-            else: ### cls_data_cnt = 850 or 900
-                val_data = cls_data[train_cnt:cls_data_cnt] ### cls_data[700:850]
-        else:
-            if self.debug:
-                print(f'{cls_data_cnt} data in class {label} not enough to split into train:{train_cnt} and validation:{val_cnt}')
+        cls_data_cnt = cls_data.count()[0]
+        cls_unique_label = int(np.unique(cls_data.label)[0])
+        #if self.debug: print('cls_unique_label', cls_unique_label)
+        if self.designated_ukc_cls == cls_unique_label:
             if cls_data_cnt < test_cnt:
                 ukc_data = cls_data[0:cls_data_cnt]
             else:
                 ukc_data = cls_data[0:test_cnt]
+            print(f'class {cls_unique_label} is add as ukc')
+        else:
+            if self.ablation <= cls_data_cnt: ### if 1000 <= 2000            
+                train_data = cls_data[0:train_cnt] ### cls_data[0:700]
+                val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
+                test_data = cls_data[train_cnt+val_cnt:self.ablation] ### cls_data[900:1000]
+            elif self.ablation > cls_data_cnt and cls_data_cnt >= train_cnt+val_cnt: ### 1000>950 and 950>(700+200)
+                train_data = cls_data[0:train_cnt] ### cls_data[0:700]
+                remaining_for_test = cls_data_cnt - (train_cnt+val_cnt) ### 950 - (700+200) = 50
+                if remaining_for_test > 0: ### 50 > 0
+                    val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
+                    test_data = cls_data[train_cnt+val_cnt:cls_data_cnt] ### cls_data[900:950]
+                else: ### cls_data_cnt = 850 or 900
+                    val_data = cls_data[train_cnt:cls_data_cnt] ### cls_data[700:850]
+            else:
+                if self.debug:
+                    print(f'{cls_data_cnt} data in class {label} not enough to split into train:{train_cnt} and validation:{val_cnt}, adding the entire data as ukc')
+                if self.designated_ukc_cls is None:    
+                    if cls_data_cnt < test_cnt:
+                        ukc_data = cls_data[0:cls_data_cnt]
+                    else:
+                        ukc_data = cls_data[0:test_cnt]
         if self.debug:    
             if train_data is not None:
                 print(f'train_{label}:, {train_data.count()[0]}')
@@ -311,6 +320,7 @@ class BGLog:
     def get_train_test_multi_class(self,):
         # classes = ['NORMALBGL', 'FATALBGL', 'ERRORBGL', 'WARNINGBGL','SEVEREBGL', 'KillBGL', 'FAILUREBGL', ] 
         classes=self.classes
+        if self.debug: print(f'ablation set to : {self.ablation}')
         if self.padded_num_seq_df is None:
             self.get_padded_num_seq_df()
         bgldf = self.padded_num_seq_df 
@@ -324,17 +334,18 @@ class BGLog:
         self.train_df = pd.concat(train_data)
         self.val_df = pd.concat(val_data)
         self.test_df = pd.concat(test_data)
-        self.ukc_df = pd.concat(ukc_data)
-        ukc_num = self.ukc_df.count()[0]
-        if ukc_num >= self.ukc_cnt:
-            ukc_to_add = self.ukc_df[0:self.ukc_cnt]
-        else:
-            ukc_to_add = self.ukc_df[0:ukc_num]        
-        self.test_df = pd.concat([self.test_df, ukc_to_add])
+        if ukc_data:
+            self.ukc_df = pd.concat(ukc_data)
+            ukc_num = self.ukc_df.count()[0]
+            if ukc_num >= self.ukc_cnt:
+                ukc_to_add = self.ukc_df[0:self.ukc_cnt]
+            else:
+                ukc_to_add = self.ukc_df[0:ukc_num]        
+            self.test_df = pd.concat([self.test_df, ukc_to_add])
         if self.debug: 
-            print(self.train_df.label.value_counts())
-            print(self.val_df.label.value_counts())
-            print(self.test_df.label.value_counts())
+            print('train:',self.train_df.label.value_counts())
+            print('val:', self.val_df.label.value_counts())
+            print('test:',self.test_df.label.value_counts())
         return self.train_df, self.val_df, self.test_df  
     
     
@@ -357,18 +368,27 @@ class BGLog:
         self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=ukc_label
         y_test = to_categorical(y_test)
         if self.debug:
-            print('test df', self.test_df.label.value_counts())
+            #print('test df', self.test_df.label.value_counts())
+            print('some example of labels:')
             print(y_test[:2])
             print(y_train[80:82])
         self.train_test_categorical = x_train, y_train, x_val, y_val, x_test, y_test
         return self.train_test_categorical
     
     
-    def get_tensor_train_val_test(self, ablation=None, ukc_cnt=None):
+    def get_tensor_train_val_test(self, ablation=None, ukc_cnt=None, designated_ukc_cls=None):
         if ablation is None: 
             ablation = self.ablation
         else:
             self.ablation = ablation
+        if designated_ukc_cls is None:
+            designated_ukc_cls = self.designated_ukc_cls
+        else:
+            self.designated_ukc_cls = designated_ukc_cls
+        if ukc_cnt is None:
+            ukc_cnt = self.ukc_cnt
+        else:
+            self.ukc_cnt = ukc_cnt
         if self.train_test_categorical is None:
             self.get_train_test_categorical()
         B = self.batch_size

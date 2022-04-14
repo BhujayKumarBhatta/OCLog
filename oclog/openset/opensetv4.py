@@ -185,11 +185,12 @@ class OpenSet:
         tpose = tf.transpose(tnsr)
         losses = [elem.numpy() for elem in self.losses]
         plt.figure(figsize=(15, 5))
-        plt.subplot(1, 2, 1) # 1 row 2 column , first plot
-        fig = sns.lineplot(data=[tpose.numpy()[0][0], 
-                           tpose.numpy()[0][1],
-                          tpose.numpy()[0][2],
-                          tpose.numpy()[0][3]])
+        plt.subplot(1, 2, 1) # 1 row 2 column , first plot        
+        # fig = sns.lineplot(data=[tpose.numpy()[0][0], 
+        #                    tpose.numpy()[0][1],
+        #                   tpose.numpy()[0][2],
+        #                   tpose.numpy()[0][3]])
+        fig = sns.lineplot(data=[tpose.numpy()[0][i] for i in range(self.num_labels)])
         fig.set_xlabel("Epochs")
         fig.set_ylabel("Radius")
         plt.subplot(1, 2, 2) # # 1 row 2 column , 2nd plot

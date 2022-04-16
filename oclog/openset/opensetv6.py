@@ -75,9 +75,9 @@ class OpenSet:
             self.radius_changes.append(self.radius)
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
-            _, _, eval_score_train = self.evaluate(data_train, debug=False)
+            _, _, eval_score_train, _ = self.evaluate(data_train, debug=False)
             if data_val:
-                _, _, eval_score_val = self.evaluate(data_val, debug=False) 
+                _, _, eval_score_val, _ = self.evaluate(data_val, debug=False) 
                 print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
             else:
@@ -203,7 +203,7 @@ class OpenSet:
             print(f'f1_weighted: {f1_weighted}, f1_macro: {f1_macro}, '
                   f'f1_micro: {f1_micro}, f_measure: {f_measure}')
             print(cls_report)
-        return y_true, y_pred, f1_weighted
+        return y_true, y_pred, f1_weighted, f_measure
     
     def plot_radius_chages(self):
         narr = np.array([elem.numpy() for elem in self.radius_changes])

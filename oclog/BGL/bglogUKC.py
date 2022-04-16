@@ -342,10 +342,10 @@ class BGLog:
             else:
                 ukc_to_add = self.ukc_df[0:ukc_num]        
             self.test_df = pd.concat([self.test_df, ukc_to_add])
-        if self.debug: 
-            print('train:',self.train_df.label.value_counts())
-            print('val:', self.val_df.label.value_counts())
-            print('test:',self.test_df.label.value_counts())
+        # if self.debug: 
+        #     print('train:',self.train_df.label.value_counts())
+        #     print('val:', self.val_df.label.value_counts())
+        #     print('test:',self.test_df.label.value_counts())
         return self.train_df, self.val_df, self.test_df  
     
     
@@ -355,7 +355,7 @@ class BGLog:
         x_train = list(self.train_df.seq.values)
         y_train = list(self.train_df.label.values)        
         y_train = to_categorical(y_train)
-        print(y_train[:2])
+        
         x_val = list(self.val_df.seq.values)
         y_val = list(self.val_df.label.values)
         y_val = to_categorical(y_val)
@@ -370,6 +370,7 @@ class BGLog:
         if self.debug:
             #print('test df', self.test_df.label.value_counts())
             print('some example of labels:')
+            print(y_train[:2])
             print(y_test[:2])
             print(y_train[80:82])
         self.train_test_categorical = x_train, y_train, x_val, y_val, x_test, y_test
@@ -395,14 +396,17 @@ class BGLog:
         x_train, y_train, x_val, y_val, x_test, y_test = self.train_test_categorical
         train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
         train_data = train_data.shuffle(buffer_size=y_train.shape[0]).batch(B, drop_remainder=True)
-        print(train_data)
+        
         val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
         val_data = val_data.shuffle(buffer_size=y_val.shape[0]).batch(B, drop_remainder=True)
-        print(val_data)
+        
         test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
         test_data = test_data.shuffle(buffer_size=y_test.shape[0]).batch(B, drop_remainder=True)
-        print(test_data)
-        if self.debug:            
+        
+        if self.debug: 
+            print('train_data',train_data)
+            print('val_data', val_data)
+            print('test_data', test_data)
             print(train_data.element_spec[0].shape[2])
             print(train_data.element_spec[1].shape[1])
         self.tensor_train_val_test = train_data, val_data, test_data
@@ -413,7 +417,7 @@ class BGLog:
 def get_embedding_layer(log_obj):
     tk = log_obj.tk
     vocab_size = len(tk.word_index)
-    print(f'vocab_size: {vocab_size}')
+    if self.debug: print(f'vocab_size: {vocab_size}')
     char_onehot = vocab_size
     embedding_weights = []
     embedding_weights.append(np.zeros(vocab_size))

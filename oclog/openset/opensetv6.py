@@ -40,7 +40,7 @@ class OpenSet:
         self.best_eval_score = 0
         self.ukc_label = 999
     
-    def train(self, data_train, lr_rate=0.05, epochs=1, wait_patient=3, optimizer='adam'):
+    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patient=3, optimizer='adam'):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)    
         ### ### why is it needed ? 
         #self.radius = tf.nn.softplus(lossfunction.theta)
@@ -75,8 +75,16 @@ class OpenSet:
             self.radius_changes.append(self.radius)
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
-            _, _, eval_score = self.evaluate(data_train, debug=False)           
-            print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, eval_score: {eval_score}' )
+            _, _, eval_score_train = self.evaluate(data_train, debug=False)
+            if data_val:
+                _, _, eval_score_val = self.evaluate(data_val, debug=False) 
+                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
+                      f'F1_val: {eval_score_val}')
+            else:
+                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')
+            eval_score=eval_score_train
+            if data_val:
+                eval_score = eval_score_val            
             if eval_score > self.best_eval_score:
                 wait = 0
                 self.best_eval_score = eval_score

@@ -5,6 +5,7 @@ Created on Sun Feb 13 21:24:31 2022
 @author: Bhujay_ROG
 """
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -23,7 +24,7 @@ class OpenSet:
     ''' 
     self.num_labels = number of classes
     self.embedding_size = number of neurons in the logits layers of the pretrained model'''
-    def __init__(self, num_labels, pretrained_model, embedding_size=16, function_model=False):
+    def __init__(self, num_labels, pretrained_model, embedding_size=16, function_model=False, pretrain_hist=None):
 #         super().__init__():
         self.pretrained_model = pretrained_model        
         self.centroids = None
@@ -32,6 +33,8 @@ class OpenSet:
         self.radius = None      
         self.radius_changes = []
         self.losses = []
+        self.f1_tr_lst = []
+        self.f1_val_lst = []
         self.function_model = function_model
         self.features = None
         self.pred_eudist = None
@@ -39,13 +42,17 @@ class OpenSet:
         self.unknown = None
         self.best_eval_score = 0
         self.ukc_label = 999
+        self.pretrain_hist = pretrain_hist
+        self.figsize = (20, 10)
+        self.epoch = 0
     
-    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patient=3, optimizer='adam'):
+    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patient=3, optimizer='adam',
+             pretrain_hist=None, figsize=(20, 10)):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)    
         ### ### why is it needed ? 
         #self.radius = tf.nn.softplus(lossfunction.theta)
         ### ### calculate centroid  after each ephochs after a fresh training
-        self.centroids = self.centroids_cal(data_train) 
+        self.centroids = self.centroids_cal(data_train)       
         if optimizer == 'nadam':
             optimizer = tf.keras.optimizers.Nadam(learning_rate=lr_rate) # does it take criterion_boundary.parameters() ??
         elif optimizer == 'sgd':
@@ -57,7 +64,7 @@ class OpenSet:
         else:
             print(f'unknown optimizer {optimizer}. assigning default as adam')
             optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)
-            
+        self.pretrain_hist = pretrain_hist    
             
         wait, best_radius, best_centroids = 0, None, None 
         for epoch in range(epochs):
@@ -76,8 +83,10 @@ class OpenSet:
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
             _, _, eval_score_train, _ = self.evaluate(data_train, debug=False)
+            self.f1_tr_lst.append(round(eval_score_train, 4))
             if data_val:
-                _, _, eval_score_val, _ = self.evaluate(data_val, debug=False) 
+                _, _, eval_score_val, _ = self.evaluate(data_val, debug=False)
+                self.f1_val_lst.append(round(eval_score_val, 4))
                 print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
             else:
@@ -85,15 +94,16 @@ class OpenSet:
             eval_score=eval_score_train
             if data_val:
                 eval_score = eval_score_val            
-            if eval_score > self.best_eval_score:
+            if eval_score_train > self.best_eval_score or eval_score_val > self.best_eval_score:
                 wait = 0
                 self.best_eval_score = eval_score
                 best_radius = self.radius
                 best_centroids = self.centroids
             else:
                 wait += 1
-                if wait >= wait_patient:
-                    break        
+                if wait >= wait_patient:                    
+                    break
+            self.epoch = epoch
         self.radius = best_radius
         self.centroids = best_centroids
         self.plot_radius_chages()
@@ -206,23 +216,58 @@ class OpenSet:
         return y_true, y_pred, f1_weighted, f_measure
     
     def plot_radius_chages(self):
+        if self.pretrain_hist:
+            pre_scores = self.pretrain_hist.history
+            # pre_scores = self.pretrain_hist.history.copy()
+            # score_keys = ['accuracy', 'precision', 'recall', 'val_accuracy', 'val_precision', 'val_recall']
+            pre_scores = {k:pre_scores[k] for k in pre_scores.keys() if 'loss' not in k }
+            pre_scores_df = pd.DataFrame(pre_scores)
+            # print(pre_scores_df)
+            # pre_losses = self.pretrain_hist.history.copy()
+            pre_losses = self.pretrain_hist.history
+            # loss_keys = ['loss', 'val_loss']
+            pre_losses = {k:pre_losses[k] for k in pre_losses.keys() if 'loss' in k }
+            pre_losses_df = pd.DataFrame(pre_losses)
+            # print(pre_losses_df)
         narr = np.array([elem.numpy() for elem in self.radius_changes])
         tnsr = tf.convert_to_tensor(narr)        
         tpose = tf.transpose(tnsr)
+        radius = [tpose.numpy()[0][i] for i in range(self.num_labels)]
         losses = [elem.numpy() for elem in self.losses]
-        plt.figure(figsize=(15, 5))
-        plt.subplot(1, 2, 1) # 1 row 2 column , first plot        
-        # fig = sns.lineplot(data=[tpose.numpy()[0][0], 
-        #                    tpose.numpy()[0][1],
-        #                   tpose.numpy()[0][2],
-        #                   tpose.numpy()[0][3]])
-        fig = sns.lineplot(data=[tpose.numpy()[0][i] for i in range(self.num_labels)])
-        fig.set_xlabel("Epochs")
-        fig.set_ylabel("Radius")
-        plt.subplot(1, 2, 2) # # 1 row 2 column , 2nd plot
-        fig2 = sns.lineplot(data=[losses])
-        fig2.set_xlabel("Epochs")
-        fig2.set_ylabel("Loss")
+        f1_tr = np.array(self.f1_tr_lst) * 100
+        val_tr = np.array(self.f1_val_lst) * 100
+        # print(radius)
+        f1_scores = [f1_tr, val_tr]
+        f1_scores = pd.DataFrame({'train':f1_tr, 'val': val_tr})        
+        plt.figure(figsize=self.figsize)
+        if self.pretrain_hist:
+            plt.subplot(2, 2, 1) ### 2 rows 2 column , first plot
+            fig1 = sns.lineplot(data=pre_scores_df, )
+            plt.legend(loc=0)
+            fig1.set_ylabel("pre-training Scores")
+            fig1.set_xlabel("Pre-training Epochs")
+            plt.subplot(2, 2, 2) ### 1st row 2 column , 2nd plot
+            fig2 = sns.lineplot(data=pre_losses_df)
+            fig2.set_xlabel("Pre-training Epochs")
+            fig2.set_ylabel("pre-training Loss")
+            plt.subplot(2, 2, 3) # 2nd row 1st column , 3rd plot
+        else:
+            plt.subplot(1, 2, 1) # 1 row 2 column , first plot
+        fig3a = sns.lineplot(data=radius)
+        plt.legend(loc=0)
+        fig3a.set_xlabel("Epochs")
+        fig3a.set_ylabel("Radius")
+        ax2 = plt.twinx()
+        fig3b=sns.lineplot(data=f1_scores, color="purple", ax=ax2,)
+        fig3b.set_ylabel("F1 score")
+        ax2.legend(loc=1)
+        if self.pretrain_hist:
+            plt.subplot(2, 2, 4) # 2nd row 2nd column , 4th plot
+        else:
+            plt.subplot(1, 2, 2) # # 1 row 2 column , 2nd plot
+        fig4 = sns.lineplot(data=[losses])
+        fig4.set_xlabel("Epochs")
+        fig4.set_ylabel("Loss")
         plt.show()
         
         

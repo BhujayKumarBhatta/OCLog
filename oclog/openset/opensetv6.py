@@ -45,8 +45,10 @@ class OpenSet:
         self.pretrain_hist = pretrain_hist
         self.figsize = (20, 10)
         self.epoch = 0
+        self.best_train_score = 0
+        self.best_val_score = 0
     
-    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patient=3, optimizer='adam',
+    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
              pretrain_hist=None, figsize=(20, 10)):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)    
         ### ### why is it needed ? 
@@ -90,18 +92,23 @@ class OpenSet:
                 print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
             else:
-                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')
-            eval_score=eval_score_train
-            if data_val:
-                eval_score = eval_score_val            
-            if eval_score_train > self.best_eval_score or eval_score_val > self.best_eval_score:
+                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')            
+            
+            if (eval_score_train > self.best_train_score) or (eval_score_val > self.best_val_score):
                 wait = 0
-                self.best_eval_score = eval_score
+                if eval_score_train > self.best_train_score:                
+                    self.best_train_score = eval_score_train
+                if data_val and eval_score_val > self.best_val_score:
+                    self.best_val_score = eval_score_val
                 best_radius = self.radius
-                best_centroids = self.centroids
-            else:
+                best_centroids = self.centroids                
+            else:    
                 wait += 1
-                if wait >= wait_patient:                    
+                if eval_score_train <= self.best_train_score:
+                    print(f'train score not improving  going to wait state {wait}')
+                if eval_score_val <= self.best_val_score:
+                    print(f'val score not improving  going to wait state {wait}')                
+                if wait >= wait_patience:                    
                     break
             self.epoch = epoch
         self.radius = best_radius

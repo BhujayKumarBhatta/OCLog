@@ -317,11 +317,11 @@ class BGLog:
                         ukc_data = cls_data[0:test_cnt]
         # if self.debug:    
         if train_data is not None:
-            print(f'train_{label}:, {train_data.count()[0]}')
+            print(f'train_{label}:, {train_data.count()[0]}', end=', ')
         if val_data is not None:
-            print(f'val_{label}:, {val_data.count()[0]}')
+            print(f'val_{label}:, {val_data.count()[0]}', end=', ')
         if test_data is not None:
-            print(f'test_{label}:, {test_data.count()[0]}')
+            print(f'test_{label}:, {test_data.count()[0]}', end=', ')
         if ukc_data is not None:
             print(f'ukc_{label}:, {ukc_data.count()[0]}')
         return train_data, val_data,test_data, ukc_data
@@ -352,10 +352,10 @@ class BGLog:
             else:
                 ukc_to_add = self.ukc_df[0:ukc_num]        
             self.test_df = pd.concat([self.test_df, ukc_to_add])
-        # if self.debug: 
-        #     print('train:',self.train_df.label.value_counts())
-        #     print('val:', self.val_df.label.value_counts())
-        #     print('test:',self.test_df.label.value_counts())
+        if self.debug: 
+            print('train:',self.train_df.label.value_counts())
+            print('val:', self.val_df.label.value_counts())
+            print('test:',self.test_df.label.value_counts())
         return self.train_df, self.val_df, self.test_df  
     
     
@@ -378,7 +378,7 @@ class BGLog:
         self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=ukc_label
         y_test = to_categorical(y_test)
         if self.debug:
-            #print('test df', self.test_df.label.value_counts())
+            print('test df', self.test_df.label.value_counts())
             print('some example of labels:')
             print(y_train[:2])
             print(y_test[:2])
@@ -418,7 +418,9 @@ class BGLog:
             print('val_data', val_data)
             print('test_data', test_data)
             print('char in lines, train_data.element_spec[0].shape[2]',train_data.element_spec[0].shape[2])
-            print('num classes, train_data.element_spec[1].shape[1]: ',train_data.element_spec[1].shape[1])
+            print('num classes, train_data.element_spec[1].shape[1]: ',train_data.element_spec[1].shape[1])            
+            print('length of val_data:',len(val_data))
+        print('length of train_data - (num_seq_per_cls * num_class)// batch size:', len(train_data))
         self.tensor_train_val_test = train_data, val_data, test_data
         return self.tensor_train_val_test
 

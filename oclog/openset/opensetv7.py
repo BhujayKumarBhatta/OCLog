@@ -25,7 +25,8 @@ class OpenSet:
     ''' 
     self.num_labels = number of classes
     self.embedding_size = number of neurons in the logits layers of the pretrained model'''
-    def __init__(self, num_labels, pretrained_model, embedding_size=16, function_model=False, pretrain_hist=None):
+    def __init__(self, num_labels, pretrained_model, embedding_size=16, function_model=False, pretrain_hist=None, 
+                ukc_label=9):
 #         super().__init__():
         self.pretrained_model = pretrained_model        
         self.centroids = None
@@ -45,15 +46,22 @@ class OpenSet:
         self.pred_radius = None
         self.unknown = None
         self.best_eval_score = 0
-        self.ukc_label = 999
+        self.ukc_label = ukc_label
         self.pretrain_hist = pretrain_hist
         self.figsize = (20, 10)
         self.epoch = 0
         self.best_train_score = 0
         self.best_val_score = 0
+        self.perplexity = 200
+        self.early_exaggeration = 12
+        self.random_state = 123, 
+        self.learning_rate = 80
+        self.feature_pic_size = 20
+        self.centroid_pic_size = 200
     
-    def train(self, data_train, data_val=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
-             pretrain_hist=None, figsize=(20, 10)):
+    def train(self, data_train, data_val=None,data_test=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
+             pretrain_hist=None, figsize=(20, 10), perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
+                          feature_pic_size=None, centroid_pic_size=None):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)    
         ### ### why is it needed ? 
         #self.radius = tf.nn.softplus(lossfunction.theta)
@@ -69,7 +77,15 @@ class OpenSet:
              optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)
         else:
             print(f'unknown optimizer {optimizer}. assigning default as adam')
-            optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)    
+        
+        if perplexity: self.perplexity = perplexity
+        if early_exaggeration: self.early_exaggeration = early_exaggeration
+        if learning_rate: self.learning_rate = learning_rate
+        if random_state: self.random_state = random_state
+        if feature_pic_size: self.feature_pic_size = feature_pic_size
+        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size   
+      
         self.pretrain_hist = pretrain_hist    
             
         wait, best_radius, best_centroids = 0, None, None 
@@ -117,6 +133,8 @@ class OpenSet:
             self.epoch = epoch
         self.radius = best_radius
         self.centroids = best_centroids
+        if data_test:
+            _, _, f1_weighted, f_measure = self.evaluate(data_test, ukc_label=self.ukc_label, store_features=True)
         self.plot_radius_chages()
         return self.losses, self.radius_changes
     
@@ -218,7 +236,7 @@ class OpenSet:
         if store_features:
             self.total_preds = y_pred
             total_features = np.array(total_features)
-            # total_features = np.reshape(total_features, (len(total_preds), self.embedding_size))
+            total_features = np.reshape(total_features, ((total_features.shape[0] * total_features.shape[1]), total_features.shape[2])    ) 
             self.total_features = total_features
         cm = confusion_matrix(y_true, y_pred)
         acc = round(accuracy_score(y_true, y_pred) * 100, 2)
@@ -235,7 +253,16 @@ class OpenSet:
             print(cls_report)
         return y_true, y_pred, f1_weighted, f_measure
     
-    def plot_radius_chages(self):
+    def plot_radius_chages(self, perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
+                          feature_pic_size=None, centroid_pic_size=None):
+        
+        if perplexity: self.perplexity = perplexity
+        if early_exaggeration: self.early_exaggeration = early_exaggeration
+        if learning_rate: self.learning_rate = learning_rate
+        if random_state: self.random_state = random_state
+        if feature_pic_size: self.feature_pic_size = feature_pic_size
+        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size   
+        
         if self.pretrain_hist:
             pre_scores = self.pretrain_hist.history
             # pre_scores = self.pretrain_hist.history.copy()
@@ -261,18 +288,18 @@ class OpenSet:
         f1_scores = pd.DataFrame({'train':f1_tr, 'val': val_tr})        
         plt.figure(figsize=self.figsize)
         if self.pretrain_hist:
-            plt.subplot(2, 2, 1) ### 2 rows 2 column , first plot
+            plt.subplot(3, 2, 1) ### 2 rows 2 column , first plot
             fig1 = sns.lineplot(data=pre_scores_df, )
             plt.legend(loc=0)
             fig1.set_ylabel("pre-training Scores")
             fig1.set_xlabel("Pre-training Epochs")
-            plt.subplot(2, 2, 2) ### 1st row 2 column , 2nd plot
+            plt.subplot(3, 2, 2) ### 1st row 2 column , 2nd plot
             fig2 = sns.lineplot(data=pre_losses_df)
             fig2.set_xlabel("Pre-training Epochs")
             fig2.set_ylabel("pre-training Loss")
-            plt.subplot(2, 2, 3) # 2nd row 1st column , 3rd plot
+            plt.subplot(3, 2, 3) # 2nd row 1st column , 3rd plot
         else:
-            plt.subplot(1, 2, 1) # 1 row 2 column , first plot
+            plt.subplot(2, 2, 1) # 1 row 2 column , first plot
         fig3a = sns.lineplot(data=radius)
         plt.legend(loc=0)
         fig3a.set_xlabel("Epochs")
@@ -282,12 +309,37 @@ class OpenSet:
         fig3b.set_ylabel("F1 score")
         ax2.legend(loc=1)
         if self.pretrain_hist:
-            plt.subplot(2, 2, 4) # 2nd row 2nd column , 4th plot
+            plt.subplot(3, 2, 4) # 2nd row 2nd column , 4th plot
         else:
-            plt.subplot(1, 2, 2) # # 1 row 2 column , 2nd plot
+            plt.subplot(2, 2, 2) # # 1 row 2 column , 2nd plot
         fig4 = sns.lineplot(data=[losses])
         fig4.set_xlabel("Epochs")
         fig4.set_ylabel("Loss")
+        if self.pretrain_hist:
+            ax5 = plt.subplot(3, 2, 5) # 2nd row 2nd column , 4th plot
+        else:
+            ax5 = plt.subplot(2, 2, 3) # # 1 row 2 column , 2nd plot
+        if len(self.total_features) > 0:
+            a = np.array(self.total_features)
+            c = self.centroids.numpy()
+            tsne = TSNE(perplexity=self.perplexity, early_exaggeration=self.early_exaggeration, 
+                        random_state=self.random_state, learning_rate=self.learning_rate)
+            tout = tsne.fit_transform(a)
+            cout = tsne.fit_transform(c)
+            m_scaler = MinMaxScaler()
+            s_scalar = StandardScaler()
+            # scaled_tout = m_scaler.fit_transform(tout)
+            # scaled_cout = m_scaler.fit_transform(cout)
+            scaled_tout = s_scalar.fit_transform(tout)
+            scaled_cout = s_scalar.fit_transform(cout)
+            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=self.feature_pic_size, cmap='tab10', )
+            legend1 = ax5.legend(*scatter.legend_elements(),
+                                loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
+            ax5.add_artist(legend1)
+            cmap_1 = scatter.get_cmap().colors
+            ccolor = np.array([cmap_1[i] for i in  range(len(c))])
+            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
+            ax5.set_xlabel("class features and their centroids")
         plt.show()
         
         

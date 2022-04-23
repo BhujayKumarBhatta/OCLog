@@ -4,6 +4,9 @@ Created on Sun Feb 13 21:24:31 2022
 
 @author: Bhujay_ROG
 """
+import os
+from openpyxl import Workbook
+from openpyxl import load_workbook
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -20,6 +23,9 @@ import sklearn.metrics as m
 import warnings
 warnings.filterwarnings('ignore')
 from collections import defaultdict
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.manifold import TSNE
+from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
 class OpenSet:
     ''' 
@@ -48,18 +54,20 @@ class OpenSet:
         self.best_eval_score = 0
         self.ukc_label = ukc_label
         self.pretrain_hist = pretrain_hist
-        self.figsize = (20, 10)
+        self.figsize = (20, 12)
         self.epoch = 0
         self.best_train_score = 0
         self.best_val_score = 0
         self.perplexity = 200
         self.early_exaggeration = 12
-        self.random_state = 123, 
+        self.random_state = 123 
         self.learning_rate = 80
         self.feature_pic_size = 20
         self.centroid_pic_size = 200
+        self.tf_random_seed = 1234
+        self.ptmodel_name = 'ptmodel'
     
-    def train(self, data_train, data_val=None,data_test=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
+    def train(self, data_train, data_val=None, data_test=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
              pretrain_hist=None, figsize=(20, 10), perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
                           feature_pic_size=None, centroid_pic_size=None):
         lossfunction = BoundaryLoss(num_labels=self.num_labels)    
@@ -132,9 +140,8 @@ class OpenSet:
                     break
             self.epoch = epoch
         self.radius = best_radius
-        self.centroids = best_centroids
-        if data_test:
-            _, _, f1_weighted, f_measure = self.evaluate(data_test, ukc_label=self.ukc_label, store_features=True)
+        self.centroids = best_centroids        
+         _, _, f1_weighted, f_measure = self.evaluate(data_train, ukc_label=self.ukc_label, store_features=True)
         self.plot_radius_chages()
         return self.losses, self.radius_changes
     
@@ -251,6 +258,7 @@ class OpenSet:
             print(f'f1_weighted: {f1_weighted}, f1_macro: {f1_macro}, '
                   f'f1_micro: {f1_micro}, f_measure: {f_measure}')
             print(cls_report)
+            self.plot_centroids(total_features, total_preds)
         return y_true, y_pred, f1_weighted, f_measure
     
     def plot_radius_chages(self, perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
@@ -322,6 +330,7 @@ class OpenSet:
         if len(self.total_features) > 0:
             a = np.array(self.total_features)
             c = self.centroids.numpy()
+            p = np.array(self.total_preds)
             tsne = TSNE(perplexity=self.perplexity, early_exaggeration=self.early_exaggeration, 
                         random_state=self.random_state, learning_rate=self.learning_rate)
             tout = tsne.fit_transform(a)
@@ -333,10 +342,10 @@ class OpenSet:
             scaled_tout = s_scalar.fit_transform(tout)
             scaled_cout = s_scalar.fit_transform(cout)
             fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=self.feature_pic_size, cmap='tab10', )
-            legend1 = ax5.legend(*scatter.legend_elements(),
+            legend1 = ax5.legend(*fig5.legend_elements(),
                                 loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
             ax5.add_artist(legend1)
-            cmap_1 = scatter.get_cmap().colors
+            cmap_1 = fig5.get_cmap().colors
             ccolor = np.array([cmap_1[i] for i in  range(len(c))])
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
             ax5.set_xlabel("class features and their centroids")
@@ -363,3 +372,121 @@ class OpenSet:
         result['Open'] = f_unseen
         result['F1-score'] = f
         return result
+    
+    
+    def train_ptmodel(self, bglog=None, train_data=None, val_data=None, ptmodel_name='ptmodel', pt_wait=3, 
+                               pre_training_checkpoint=True, chars_in_line=64, line_in_seq=32,
+                               pt_optimizer='adam', pt_loss='categorical_crossentropy', pretrain_epochs=5):        
+        tf.random.set_seed(self.tf_random_seed)
+        if bglog is None:
+            train_data, val_data,  test_data, bglog = self.get_bgdata()
+        line_encoder = LogLineEncoder(bglog, chars_in_line=chars_in_line)
+        logSeqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=embedding_size)
+        ptmodel = LogClassifier(line_encoder=line_encoder, seq_encoder=logSeqencer, num_classes=num_classes)
+        ptmodel.compile(optimizer=pt_optimizer, loss=pt_loss,
+                      metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()])
+          
+        if ptmodel_name:
+            self.ptmodel_name = ptmodel_name 
+        print(datetime.datetime.now())
+        print('starting to create {} automatically'.format(self.model_name))
+        curr_dt_time = datetime.datetime.now()
+        model_name = self.ptmodel_name + '_init_' + str(curr_dt_time).replace(' ','').replace(':','_') + '/'
+        if not os.path.exists(model_name):
+            os.mkdir(model_name)
+        filepath = model_name + 'model-{epoch:05d}-{loss:.5f}-{categorical_accuracy:.5f}.h5' 
+        monitor_metric = 'categorical_accuracy' 
+        if val_data is not None:            
+            filepath = model_name + 'model-{epoch:05d}-{loss:.5f}-{categorical_accuracy:.5f}-{val_loss:.5f}-{val_categorical_accuracy:.5f}.h5'
+        monitor_metric = 'val_loss'
+        checkpoint = ModelCheckpoint(filepath, monitor=monitor_metric, verbose=1, 
+                                     save_best_only=True, save_weights_only=False, 
+                                     mode='auto', period=1)
+
+        LR = ReduceLROnPlateau(monitor=monitor_metric, factor=0.5, patience=2, cooldown=1, verbose=1)
+        earlystop = EarlyStopping(monitor=monitor_metric, min_delta=0, patience=pt_wait, verbose=1)
+        if pre_training_checkpoint:
+            callbacks_list = [checkpoint, LR, earlystop] 
+        print('staring pre trining')
+        hist = ptmodel.fit(train_data, validation_data=val_data, epochs=pretrain_epochs,
+                          callbacks=callbacks_list,) 
+        
+        self.plot_pretrain_result(hist)        
+        return ptmodel, hist
+    
+    
+    def plot_pretrain_result(self, hist):
+        pre_scores = hist.history
+        pre_scores = {k:pre_scores[k] for k in pre_scores.keys() if 'loss' not in k }
+        pre_scores_df = pd.DataFrame(pre_scores)       
+        pre_losses = hist.history        
+        pre_losses = {k:pre_losses[k] for k in pre_losses.keys() if 'loss' in k }
+        pre_losses_df = pd.DataFrame(pre_losses)   
+        plt.figure(figsize=self.figsize)
+        plt.subplot(1, 2, 1) ### 1 rows 2 column , first plot
+        fig1 = sns.lineplot(data=pre_scores_df, )
+        plt.legend(loc=0)
+        fig1.set_ylabel("pre-training Scores")
+        fig1.set_xlabel("Pre-training Epochs")
+        plt.subplot(1, 2, 2) ### 1st row 2 column , 2nd plot
+        fig2 = sns.lineplot(data=pre_losses_df)
+        fig2.set_xlabel("Pre-training Epochs")
+        fig2.set_ylabel("pre-training Loss")
+        plt.show()
+    
+    
+    def get_bgdata(self, bglog_model, logpath, padded_char_len=64, ablation=5000, designated_ukc_cls=3,
+                    num_classes=2, embedding_size=128,lr_rate=3, pt_optimizer='sgd',
+                    pretrain_epochs=3, debug=False,  batch_size=32, train_ratio=0.8,
+                    clean_part_1=False, clean_part_2=False, clean_time_1=False, clean_part_4=False, 
+                    clean_time_2=False,clean_part_6=False, tk_file='bgl_tk_176.pkl', pkl_file='bgl_ukc_176.pkl',
+                    save_padded_num_sequences=False, load_from_pkl=False,  ):
+        bglog = bglog_model(logpath=logpath,save_padded_num_sequences=save_padded_num_sequences, debug=debug, 
+                      load_from_pkl=load_from_pkl, tk_file=tk_file, pkl_file=pkl_file, 
+                      batch_size=batch_size, train_ratio=train_ratio,
+                      padded_char_len=padded_char_len,  
+                      clean_part_1=clean_part_1, clean_part_2=clean_part_2,
+                      clean_time_1=clean_time_1, clean_part_4=clean_part_4, 
+                      clean_time_2=clean_time_2,clean_part_6=clean_part_6,
+                      )
+        train_test = bglog.get_tensor_train_val_test(ablation=2500, designated_ukc_cls=designated_ukc_cls)
+        train_data, val_data,  test_data = train_test
+        return train_data, val_data,  test_data, bglog
+    
+    
+    def plot_centroids(self, total_features, total_preds,  row=1, col=1, fig=1, perplexity=None,
+                       early_exaggeration=None, random_state=None, learning_rate=None,
+                      feature_pic_size=None, centroid_pic_size=None):
+        
+        if perplexity: self.perplexity = perplexity
+        if early_exaggeration: self.early_exaggeration = early_exaggeration
+        if learning_rate: self.learning_rate = learning_rate
+        if random_state: self.random_state = random_state
+        if feature_pic_size: self.feature_pic_size = feature_pic_size
+        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size
+               
+        
+        a = np.array(total_features)
+        c = self.centroids.numpy()
+        p = np.array(total_preds)
+        tsne = TSNE(perplexity=self.perplexity, early_exaggeration=self.early_exaggeration, 
+                    random_state=self.random_state, learning_rate=self.learning_rate)
+        tout = tsne.fit_transform(a)
+        cout = tsne.fit_transform(c)
+        m_scaler = MinMaxScaler()
+        s_scalar = StandardScaler()
+        # scaled_tout = m_scaler.fit_transform(tout)
+        # scaled_cout = m_scaler.fit_transform(cout)
+        scaled_tout = s_scalar.fit_transform(tout)
+        scaled_cout = s_scalar.fit_transform(cout)
+        
+        ax5 = plt.subplot(row, col, fig) # # 1 row 2 column , 2nd plot
+        fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=self.feature_pic_size, cmap='tab10', )
+        legend1 = ax5.legend(*fig5.legend_elements(),
+                            loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
+        ax5.add_artist(legend1)
+        cmap_1 = fig5.get_cmap().colors
+        ccolor = np.array([cmap_1[i] for i in  range(len(c))])
+        ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
+        ax5.set_xlabel("class features and their centroids")
+    plt.show()

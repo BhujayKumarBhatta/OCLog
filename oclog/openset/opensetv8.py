@@ -33,18 +33,16 @@ from tensorflow.keras.models import  load_model
 
 
 
+
+
 class OpenSet:
-    ''' 
-    self.num_labels = number of classes
-    self.embedding_size = number of neurons in the logits layers of the pretrained model'''
-    def __init__(self, num_labels, pretrained_model=None, ptmodel=None,  embedding_size=16, function_model=False, pretrain_hist=None, 
-                ukc_label=9):
+    '''     
+    '''
+    def __init__(self, ptmodel=None, function_model=False):
 #         super().__init__():
-        self.pretrained_model = pretrained_model
+        
         self.ptmodel = ptmodel
-        self.centroids = None
-        self.num_labels = num_labels
-        self.embedding_size = embedding_size
+        self.centroids = None       
         self.radius = None      
         self.radius_changes = []
         self.losses = []
@@ -65,78 +63,61 @@ class OpenSet:
         self.epoch = 0
         self.best_train_score = 0
         self.best_val_score = 0
-        self.perplexity = 200
-        self.early_exaggeration = 12
-        self.random_state = 123 
-        self.learning_rate = 80
-        self.feature_pic_size = 20
-        self.centroid_pic_size = 200
-        self.tf_random_seed = 1234
+        
+       
         self.ptmodel_name = 'ptmodel'
         self.data_dir = 'data'
         self.save_dir = self.data_dir
         self.ptmodel_path = None
+        self.num_classes = None
     
-    def train(self, data_train, data_val=None, data_test=None, lr_rate=0.05, epochs=1, wait_patience=3, optimizer='adam',
-             pretrain_hist=None, figsize=(20, 10), perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
-                          feature_pic_size=None, centroid_pic_size=None):
-        lossfunction = BoundaryLoss(num_labels=self.num_labels)    
-        ### ### why is it needed ? 
+    
+    def train(self, **kwargs):          
+        ### ### why is it needed ? #####################
         #self.radius = tf.nn.softplus(lossfunction.theta)
-        ### ### calculate centroid  after each ephochs after a fresh training
-        self.centroids = self.centroids_cal(data_train)       
-        if optimizer == 'nadam':
-            optimizer = tf.keras.optimizers.Nadam(learning_rate=lr_rate) # does it take criterion_boundary.parameters() ??
-        elif optimizer == 'sgd':
-             optimizer = tf.keras.optimizers.SGD(learning_rate=lr_rate)
-        elif optimizer == 'rmsprop':
-            optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr_rate)
-        elif optimizer == 'adam':
-             optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)
-        else:
-            print(f'unknown optimizer {optimizer}. assigning default as adam')
-            optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)    
-        
-        if perplexity: self.perplexity = perplexity
-        if early_exaggeration: self.early_exaggeration = early_exaggeration
-        if learning_rate: self.learning_rate = learning_rate
-        if random_state: self.random_state = random_state
-        if feature_pic_size: self.feature_pic_size = feature_pic_size
-        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size   
-      
-        self.pretrain_hist = pretrain_hist    
-            
+        ### ### calculate centroid  after each ephochs after a fresh training############ 
+        ###################################################################
+        oc_optimizer = get_optimizer(kwargs.get('optimizer'), kwargs.get('oc_lr'))
+        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(log_obj, **kwargs)
+        oc_epochs = 1 if kwargs.get('oc_epochs') is None else kwargs.get('oc_epochs')
+        oc_wait = 3  if kwargs.get('oc_wait') is None else kwargs.get('oc_wait')
+        # num_labels = train_data
+        self.num_classes = train_data.element_spec[1].shape[1] if kwargs.get('num_classes') is None else kwargs.get('num_classes') 
+        lossfunction = BoundaryLoss(num_labels=self.num_classes)  
+        ######### get centroids #############
+        self.centroids = self.centroids_cal(data_train, **kwargs)  
+        ####################################################    
         wait, best_radius, best_centroids = 0, None, None 
-        for epoch in range(epochs):
+        for epoch in range(oc_epochs):
             ### ### calculate centroid after one more round of triaing
             # this is increasing the loss instead of decreasing in each epoch
             #self.pretrained_model.fit(data_train)
             #self.centroids = self.centroids_cal(data_train)  
             tr_loss, nb_tr_examples, nb_tr_steps = 0, 0, 0            
-            for batch in tqdm(data_train):
+            for batch in tqdm(train_data):
                 logseq_batch, label_batch = batch ## (32, 32, 64), (32, 4)
                 batch_loss, self.radius = self.train_step(lossfunction, 
-                                                     logseq_batch, label_batch, optimizer)
+                                                     logseq_batch, label_batch, oc_optimizer)
                 tr_loss += batch_loss
                 nb_tr_steps += 1                
             self.radius_changes.append(self.radius)
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
-            _, _, eval_score_train, _ = self.evaluate(data_train, debug=False, store_features=True)
+            _, _, eval_score_train, _ = self.evaluate(train_data, debug=False, store_features=True)
             self.f1_tr_lst.append(round(eval_score_train, 4))
-            if data_val:
-                _, _, eval_score_val, _ = self.evaluate(data_val, debug=False)
+            if val_data:
+                _, _, eval_score_val, _ = self.evaluate(val_data, debug=False)
                 self.f1_val_lst.append(round(eval_score_val, 4))
-                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
+                print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
             else:
-                print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')            
+                print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')            
             
             if (eval_score_train > self.best_train_score) or (eval_score_val > self.best_val_score):
                 wait = 0
                 if eval_score_train > self.best_train_score:                
                     self.best_train_score = eval_score_train
-                if data_val and eval_score_val > self.best_val_score:
+                if val_data and eval_score_val > self.best_val_score:
                     self.best_val_score = eval_score_val
                 best_radius = self.radius
                 best_centroids = self.centroids                
@@ -151,8 +132,11 @@ class OpenSet:
             self.epoch = epoch
         self.radius = best_radius
         self.centroids = best_centroids        
-        _, _, f1_weighted, f_measure = self.evaluate(data_train, ukc_label=self.ukc_label, store_features=True)
-        self.plot_radius_chages()
+        _, _, f1_weighted, f_measure = self.evaluate(train_data, ukc_label=self.ukc_label, store_features=True)
+        
+        # kwargs.update({})
+        self.plot_radius_chages(**kwargs)
+        self.plot_centroids(**kwargs)
         return self.losses, self.radius_changes
     
             
@@ -175,9 +159,11 @@ class OpenSet:
         self.features = features
         return self.features
         
-    def centroids_cal(self, data):        
-        centroids = tf.zeros((self.num_labels, self.embedding_size))
-        total_labels = tf.zeros(self.num_labels)
+    def centroids_cal(self, data, **kwargs):
+        num_classes = kwargs.get('num_classes', 4) 
+        embedding_size = kwargs.get('embedding_size', 16)        
+        centroids = tf.zeros((num_classes, embedding_size))
+        total_labels = tf.zeros(num_classes)
         for batch in data:
             logseq_batch, label_batch = batch
             ## (32, 32, 64), (32, 4)
@@ -202,12 +188,13 @@ class OpenSet:
         ### shape of centroids is (4, 16) whereas shape of total_labels is (1, 4)
         ### reshape the total_labels as 4,1 ==> [[0], [0], [0], [0]]==> 4 rows 
         ## so that we can divide the centroids array by the total_labels
-        total_label_reshaped = tf.reshape(total_labels, (self.num_labels, 1))
+        total_label_reshaped = tf.reshape(total_labels, (num_classes, 1))
         centroids /= total_label_reshaped
         # TODO: the centroid for a class is a scalar or vector ?
         return centroids  
 
-    def openpredict(self, features, debug=True):
+    def openpredict(self, features, **kwargs):
+        debug = kwargs.get('debug', True)
         logits = euclidean_metric(features, self.centroids)
         ####original line in pytorch ###probs, preds = F.softmax(logits.detach(), dim = 1).max(dim = 1)
         smax = tf.nn.softmax(logits, )
@@ -230,8 +217,13 @@ class OpenSet:
             print(f'predictions with ukc_label={self.ukc_label}', preds_np)
         return preds_np
     
-    def evaluate(self, data, debug=True, zero_div=1, ukc_label=None, store_features=False):
+    def evaluate(self, data, **kwargs, ):
         # if hasattr(data, ukc_label)
+        debug = kwargs.get('debug', True)
+        zero_div = kwargs.get('zero_div', 1)
+        ukc_label = kwargs.get('ukc_label', None)
+        store_features = kwargs.get('store_features', False)
+        
         if ukc_label is None:
             ukc_label = self.ukc_label
         else:
@@ -270,96 +262,6 @@ class OpenSet:
             print(cls_report)
             self.plot_centroids(total_features, total_preds)
         return y_true, y_pred, f1_weighted, f_measure
-    
-    def plot_radius_chages(self, perplexity=None, early_exaggeration=None, random_state=None, learning_rate=None,
-                          feature_pic_size=None, centroid_pic_size=None):
-        
-        if perplexity: self.perplexity = perplexity
-        if early_exaggeration: self.early_exaggeration = early_exaggeration
-        if learning_rate: self.learning_rate = learning_rate
-        if random_state: self.random_state = random_state
-        if feature_pic_size: self.feature_pic_size = feature_pic_size
-        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size   
-        
-        if self.pretrain_hist:
-            pre_scores = self.pretrain_hist.history
-            # pre_scores = self.pretrain_hist.history.copy()
-            # score_keys = ['accuracy', 'precision', 'recall', 'val_accuracy', 'val_precision', 'val_recall']
-            pre_scores = {k:pre_scores[k] for k in pre_scores.keys() if 'loss' not in k }
-            pre_scores_df = pd.DataFrame(pre_scores)
-            # print(pre_scores_df)
-            # pre_losses = self.pretrain_hist.history.copy()
-            pre_losses = self.pretrain_hist.history
-            # loss_keys = ['loss', 'val_loss']
-            pre_losses = {k:pre_losses[k] for k in pre_losses.keys() if 'loss' in k }
-            pre_losses_df = pd.DataFrame(pre_losses)
-            # print(pre_losses_df)
-        narr = np.array([elem.numpy() for elem in self.radius_changes])
-        tnsr = tf.convert_to_tensor(narr)        
-        tpose = tf.transpose(tnsr)
-        radius = [tpose.numpy()[0][i] for i in range(self.num_labels)]
-        losses = [elem.numpy() for elem in self.losses]
-        f1_tr = np.array(self.f1_tr_lst) * 100
-        val_tr = np.array(self.f1_val_lst) * 100
-        # print(radius)
-        f1_scores = [f1_tr, val_tr]
-        f1_scores = pd.DataFrame({'train':f1_tr, 'val': val_tr})        
-        plt.figure(figsize=self.figsize)
-        if self.pretrain_hist:
-            plt.subplot(3, 2, 1) ### 2 rows 2 column , first plot
-            fig1 = sns.lineplot(data=pre_scores_df, )
-            plt.legend(loc=0)
-            fig1.set_ylabel("pre-training Scores")
-            fig1.set_xlabel("Pre-training Epochs")
-            plt.subplot(3, 2, 2) ### 1st row 2 column , 2nd plot
-            fig2 = sns.lineplot(data=pre_losses_df)
-            fig2.set_xlabel("Pre-training Epochs")
-            fig2.set_ylabel("pre-training Loss")
-            plt.subplot(3, 2, 3) # 2nd row 1st column , 3rd plot
-        else:
-            plt.subplot(2, 2, 1) # 1 row 2 column , first plot
-        fig3a = sns.lineplot(data=radius)
-        plt.legend(loc=0)
-        fig3a.set_xlabel("Epochs")
-        fig3a.set_ylabel("Radius")
-        ax2 = plt.twinx()
-        fig3b=sns.lineplot(data=f1_scores, color="purple", ax=ax2,)
-        fig3b.set_ylabel("F1 score")
-        ax2.legend(loc=1)
-        if self.pretrain_hist:
-            plt.subplot(3, 2, 4) # 2nd row 2nd column , 4th plot
-        else:
-            plt.subplot(2, 2, 2) # # 1 row 2 column , 2nd plot
-        fig4 = sns.lineplot(data=[losses])
-        fig4.set_xlabel("Epochs")
-        fig4.set_ylabel("Loss")
-        if self.pretrain_hist:
-            ax5 = plt.subplot(3, 2, 5) # 2nd row 2nd column , 4th plot
-        else:
-            ax5 = plt.subplot(2, 2, 3) # # 1 row 2 column , 2nd plot
-        if len(self.total_features) > 0:
-            a = np.array(self.total_features)
-            c = self.centroids.numpy()
-            p = np.array(self.total_preds)
-            tsne = TSNE(perplexity=self.perplexity, early_exaggeration=self.early_exaggeration, 
-                        random_state=self.random_state, learning_rate=self.learning_rate)
-            tout = tsne.fit_transform(a)
-            cout = tsne.fit_transform(c)
-            m_scaler = MinMaxScaler()
-            s_scalar = StandardScaler()
-            # scaled_tout = m_scaler.fit_transform(tout)
-            # scaled_cout = m_scaler.fit_transform(cout)
-            scaled_tout = s_scalar.fit_transform(tout)
-            scaled_cout = s_scalar.fit_transform(cout)
-            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=self.feature_pic_size, cmap='tab10', )
-            legend1 = ax5.legend(*fig5.legend_elements(),
-                                loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
-            ax5.add_artist(legend1)
-            cmap_1 = fig5.get_cmap().colors
-            ccolor = np.array([cmap_1[i] for i in  range(len(c))])
-            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
-            ax5.set_xlabel("class features and their centroids")
-        plt.show()
         
         
     def F_measure(self, cm):
@@ -403,39 +305,47 @@ class OpenSet:
         bglog = kwargs.get('bglog')
         train_data = kwargs.get('train_data')
         val_data = kwargs.get('val_data')
-        chars_in_line = 64 if kwargs.get('chars_in_line') is None else kwargs.get('chars_in_line')
-        line_in_seq = 32 if kwargs.get('line_in_seq') is None else kwargs.get('line_in_seq')
+        chars_in_line = kwargs.get('chars_in_line', 64)
+        line_in_seq = kwargs.get('line_in_seq', 32)
         char_embedding_size = kwargs.get('char_embedding_size') # if None self.vocabulary_size will be used by the LogLineEncoder         
-        pt_optimizer = 'adam' if kwargs.get('pt_optimizer') is None else kwargs.get('pt_optimizer')
-        pt_loss = 'categorical_crossentropy' if kwargs.get('pt_loss') is None else kwargs.get('pt_loss')
-        pt_metrics = ['accuracy', tf.keras.metrics.Precision(),tf.keras.metrics.Recall()] if kwargs.get('pt_metrics') is None else kwargs.get('pt_metrics') 
-        self.tf_random_seed = kwargs.get('tf_random_seed') if kwargs.get('tf_random_seed') else self.tf_random_seed
-        self.embedding_size = self.embedding_size if kwargs.get('embedding_size') is None else kwargs.get('embedding_size')
-        self.num_classes = train_data.element_spec[1].shape[1] if kwargs.get('num_classes') is None else kwargs.get('num_classes')           
+        pt_optimizer = kwargs.get('pt_optimizer', 'adam')
+        pt_loss = kwargs.get('pt_loss', 'categorical_crossentropy')
+        pt_metrics = kwargs.get('pt_metrics', ['accuracy', tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        tf_random_seed = kwargs.get('tf_random_seed', 1234 )
+        embedding_size = kwargs.get('embedding_size', 16)
+        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
         tf.random.set_seed(self.tf_random_seed)
         if bglog is None or train_data is None or val_data is None:
             train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
         line_encoder = LogLineEncoder(bglog, chars_in_line=chars_in_line, char_embedding_size=char_embedding_size,)
-        log_seqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=self.embedding_size)
+        log_seqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=embedding_size)
         ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=self.num_classes)
         ptmodel_arch.compile(optimizer=pt_optimizer, loss=pt_loss, metrics=pt_metrics)
-        return ptmodel_arch   
+        return ptmodel_arch    
     
-    
-    def train_ptmodel(self, **kwargs, ):
+    def get_or_generate_dataset(self, log_obj, **kwargs):
         bglog = kwargs.get('bglog')
+        msg = 'you must input log object '
+        if bglog is None:
+            print(msg)
+            raise OCException(message=msg)
         train_data = kwargs.get('train_data')
         val_data = kwargs.get('val_data')
-        ptmodel = self.get_ptmodel_arch(**kwargs)
-        ptmodel_name = 'ptmodel' if kwargs.get('ptmodel_name') is None else kwargs.get('ptmodel_name')
-        monitor_metric = 'accuracy' if kwargs.get('monitor_metric') is None else kwargs.get('monitor_metric')  
-        self.data_dir = self.data_dir if kwargs.get('data_dir') is None else kwargs.get('data_dir')
-        self.save_dir = self.data_dir if kwargs.get('save_dir') is None else kwargs.get('save_dir')
-        save_ptmodel = True if kwargs.get('save_ptmodel') is None else kwargs.get('save_ptmodel')
-        pt_wait = 3  if kwargs.get('pt_wait') is None else kwargs.get('pt_wait')     
-        pt_epochs = 5  if kwargs.get('pt_epochs') is None else kwargs.get('pt_epochs')
-        if bglog is None or train_data is None or val_data is None:
+        if  train_data is None or val_data is None:
             train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
+        return train_data, val_data,  test_data, bglog        
+    
+    
+    def train_ptmodel(self, **kwargs, ):        
+        ptmodel = self.get_ptmodel_arch(**kwargs)
+        ptmodel_name = kwargs.get('ptmodel_name', 'ptmodel')
+        monitor_metric = kwargs.get('monitor_metric', 'accuracy')
+        self.data_dir = kwargs.get('data_dir', self.data_dir)
+        self.save_dir = kwargs.get('save_dir', self.data_dir)
+        save_ptmodel = kwargs.get('save_ptmodel', True)
+        pt_wait = kwargs.get('pt_wait', 3)
+        pt_epochs = kwargs.get('pt_epochs', 5)
+        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(log_obj, **kwargs)
         print(datetime.datetime.now())
         print('starting to create {} automatically'.format(ptmodel_name))
         curr_dt_time = datetime.datetime.now()
@@ -468,10 +378,39 @@ class OpenSet:
         self.pretrained_model = ptmodel
         self.ptmodel_path = filepath
         return ptmodel, hist, filepath
+      
     
+    def get_bgdata(self, bglog_model, **kwargs ):
+        bglog = bglog_model(**kwargs)
+        train_test = bglog.get_tensor_train_val_test(**kwargs)
+        train_data, val_data,  test_data = train_test
+        return train_data, val_data,  test_data, bglog
+        
+        
+    def get_optimizer(self, optimizer, lr_rate=None):
+        if optimizer == 'nadam':
+            optimizer = tf.keras.optimizers.Nadam(learning_rate=lr_rate) # does it take criterion_boundary.parameters() ??
+            if lr_rate is None:
+                optimizer = tf.keras.optimizers.Nadam()
+        elif optimizer == 'sgd':
+            optimizer = tf.keras.optimizers.SGD(learning_rate=lr_rate)
+            if lr_rate is None:
+                optimizer = tf.keras.optimizers.SGD()
+        elif optimizer == 'rmsprop':
+            optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr_rate)
+            if lr_rate is None:
+                optimizer = tf.keras.optimizers.RMSprop()
+        elif optimizer == 'adam':
+            optimizer = tf.keras.optimizers.Adam(learning_rate=lr_rate)
+            if lr_rate is None:
+                optimizer = tf.keras.optimizers.Adam()
+        else:
+            print(f'unknown optimizer {optimizer}. assigning default as adam')
+            optimizer = tf.keras.optimizers.Adam()
+        return optimizer
     
     def plot_pretrain_result(self, hist, **kwargs):
-        figsize = (20, 6) if kwargs.get('figsize') is None else kwargs.get('figsize')
+        figsize = kwargs.get('figsize',  (20, 6))
         pre_scores = hist.history
         pre_scores = {k:pre_scores[k] for k in pre_scores.keys() if 'loss' not in k }
         pre_scores_df = pd.DataFrame(pre_scores)       
@@ -489,26 +428,53 @@ class OpenSet:
         fig2.set_xlabel("Pre-training Epochs")
         fig2.set_ylabel("pre-training Loss")
         plt.show()
-      
-    
-    def get_bgdata(self, bglog_model, **kwargs ):
-        bglog = bglog_model(**kwargs)
-        train_test = bglog.get_tensor_train_val_test(**kwargs)
-        train_data, val_data,  test_data = train_test
-        return train_data, val_data,  test_data, bglog
-    
-    
-    def plot_centroids(self, total_features, total_preds,  row=1, col=1, fig=1, perplexity=None,
-                       early_exaggeration=None, random_state=None, learning_rate=None,
-                      feature_pic_size=None, centroid_pic_size=None):
         
-        if perplexity: self.perplexity = perplexity
-        if early_exaggeration: self.early_exaggeration = early_exaggeration
-        if learning_rate: self.learning_rate = learning_rate
-        if random_state: self.random_state = random_state
-        if feature_pic_size: self.feature_pic_size = feature_pic_size
-        if centroid_pic_size: self.centroid_pic_size = centroid_pic_size
-               
+        
+    def plot_radius_chages(self, **kwargs):
+        perplexity = kwargs.get('perplexity', 200)
+        early_exaggeration = kwargs.get('early_exaggeration', 12)
+        random_state = kwargs.get('random_state', 123)
+        tsne_lr = kwargs.get('tsne_lr', 80)
+        feature_pic_size = kwargs.get('feature_pic_size', 20)
+        centroid_pic_size = kwargs.get('centroid_pic_size', 200)
+        
+        narr = np.array([elem.numpy() for elem in self.radius_changes])
+        tnsr = tf.convert_to_tensor(narr)        
+        tpose = tf.transpose(tnsr)
+        radius = [tpose.numpy()[0][i] for i in range(self.num_classes)]
+        losses = [elem.numpy() for elem in self.losses]
+        f1_tr = np.array(self.f1_tr_lst) * 100
+        val_tr = np.array(self.f1_val_lst) * 100        
+        f1_scores = [f1_tr, val_tr]
+        f1_scores = pd.DataFrame({'train':f1_tr, 'val': val_tr})        
+        plt.figure(figsize=self.figsize)
+        plt.subplot(1, 2, 1) # 1 row 2 column , first plot
+        fig3a = sns.lineplot(data=radius)
+        plt.legend(loc=0)
+        fig3a.set_xlabel("Epochs")
+        fig3a.set_ylabel("Radius")
+        ax2 = plt.twinx()
+        fig3b=sns.lineplot(data=f1_scores, color="purple", ax=ax2,)
+        fig3b.set_ylabel("F1 score")
+        ax2.legend(loc=1)
+        plt.subplot(2, 2, 2) # # 1 row 2 column , 2nd plot
+        fig4 = sns.lineplot(data=[losses])
+        fig4.set_xlabel("Epochs")
+        fig4.set_ylabel("Loss")        
+        plt.show()
+        
+    def plot_centroids(self, **kwargs ):       
+        total_features = kwargs.get('total_features', self.total_features) 
+        total_preds = kwargs.get('total_preds', self.total_preds) 
+        row = kwargs.get('perplexity', 1)
+        col = kwargs.get('perplexity', 1) 
+        fig = kwargs.get('perplexity', 1)  
+        perplexity = kwargs.get('perplexity', 200)
+        early_exaggeration = kwargs.get('early_exaggeration', 12)
+        random_state = kwargs.get('random_state', 123)
+        tsne_lr = kwargs.get('tsne_lr', 80)
+        feature_pic_size = kwargs.get('feature_pic_size', 20)
+        centroid_pic_size = kwargs.get('centroid_pic_size', 200)              
         
         a = np.array(total_features)
         c = self.centroids.numpy()
@@ -534,3 +500,9 @@ class OpenSet:
         ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
         ax5.set_xlabel("class features and their centroids")
         plt.show()
+
+class OCException(Exception):
+    def __init__(self, message="Error occurred"):
+        # self.salary = salary
+        self.message = message
+        super().__init__(self.message)

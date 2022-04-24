@@ -8,27 +8,43 @@ Created on Sun Feb 13 21:24:31 2022
 import numpy as np
 import tensorflow as tf
 tf.random.set_seed(123)
-from oclog.BGL.bglog import  get_embedding_layer
+# from oclog.BGL.bglog import  get_embedding_layer
 # from bglog import BGLog, get_embedding_layer
 # bglog = BGLog(save_padded_num_sequences=False, load_from_pkl=True)
 # train_test = bglog.get_tensor_train_test(ablation=1000)
 # train_data, test_data = train_test
 
+def get_embedding_layer(log_obj):
+    tk = log_obj.tk
+    vocab_size = len(tk.word_index)
+    print(f'vocab_size: {vocab_size}')
+    char_onehot = vocab_size
+    embedding_weights = []
+    embedding_weights.append(np.zeros(vocab_size))
+    for char, i in tk.word_index.items(): # from 1 to 51
+        onehot = np.zeros(vocab_size)
+        onehot[i-1] = 1
+        embedding_weights.append(onehot)
+    embedding_weights = np.array(embedding_weights)
+    return embedding_weights, vocab_size, char_onehot
+
+
 class LogLineEncoder(tf.keras.Model):
     def __init__(self, logobj, chars_in_line=64, num_of_conv1d=3,  
                  filters=64,
-                 kernel_size=3, ):
+                 kernel_size=3, char_embedding_size=None):
         super().__init__()  
         self.logobj = logobj
         self.chars_in_line = chars_in_line
         self.num_of_conv1d = num_of_conv1d       
         self.filters = filters
-        self.kernel_size = kernel_size
+        self.kernel_size = kernel_size        
         #TODO Done: make this varaible - bglog - 
-        self.embedding_weights, self.vocab_size, self.char_onehot = get_embedding_layer(self.logobj)       
+        self.embedding_weights, self.vocab_size, self.char_onehot = get_embedding_layer(self.logobj)
+        self.char_embedding_size = self.vocab_size if  char_embedding_size is None else char_embedding_size
         
         self.embedding = tf.keras.layers.Embedding(input_dim=self.vocab_size+1,
-                                    output_dim=self.vocab_size,
+                                    output_dim=self.char_embedding_size,
                                     #TODO: make this varaible
                                     input_length=self.chars_in_line, 
                                     weights = [self.embedding_weights],
@@ -47,7 +63,9 @@ class LogLineEncoder(tf.keras.Model):
             x = conv1d_layer(x)
         x = self.maxpool2d(x)
         #TODO: make this varaible
-        x = tf.reshape(x, (inputs.shape[0], inputs.shape[1], self.filters))
+        tf_shape = tf.shape(inputs)  ### inputs.shape[0] does not work while model is saved.
+        # x = tf.reshape(x, (inputs.shape[0], inputs.shape[1], self.filters))
+        x = tf.reshape(x, (tf_shape[0], tf_shape[1], self.filters))
         return x
     
 
@@ -87,8 +105,9 @@ class LogSeqEncoder(tf.keras.Model):
         if self.addl_conv1d_layers:
             for addl_conv1d_layer in self.addl_conv1d_layers:
                 x = addl_conv1d_layer(x)
-        x = self.maxpool1d(x)        
-        x = tf.reshape(x, (inputs.shape[0], self.filters)) 
+        x = self.maxpool1d(x)
+        tf_shape = tf.shape(inputs)
+        x = tf.reshape(x, (tf_shape[0], self.filters)) 
         x = self.Dense(x)
         return x
     

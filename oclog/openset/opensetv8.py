@@ -15,7 +15,7 @@ import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
 tf.random.set_seed(123)
-# from BGL.bglog import BGLog, get_embedding_layer
+from oclog.BGL.bglv1 import BGLog
 from oclog.openset.boundary_loss import euclidean_metric, BoundaryLoss
 from oclog.openset.pretrainingV1 import LogLineEncoder, LogSeqEncoder, LogClassifier
 from tqdm import trange, tqdm, tnrange
@@ -38,10 +38,10 @@ from tensorflow.keras.models import  load_model
 class OpenSet:
     '''     
     '''
-    def __init__(self, ptmodel=None, function_model=False):
+    def __init__(self, function_model=False):
 #         super().__init__():
         
-        # self.ptmodel = ptmodel
+        self.ptmodel = None
         self.centroids = None       
         self.radius = None      
         self.radius_changes = []
@@ -52,6 +52,7 @@ class OpenSet:
         self.features = None
         self.total_features = []
         self.total_preds = []
+        self.total_labels = []
         # self.euclidean_metric = defaultdict(list)
         self.pred_eudist = None
         self.pred_radius = None
@@ -63,6 +64,7 @@ class OpenSet:
         self.epoch = 0
         self.best_train_score = 0
         self.best_val_score = 0
+        self.num_classes = None
         
        
         self.ptmodel_name = 'ptmodel'
@@ -70,10 +72,38 @@ class OpenSet:
         # self.save_dir = self.data_dir
         self.ptmodel_path = None
         self.num_classes = None
-        self.tf_random_seed = 1234
+        self.tf_random_seed = 1234        
+    
+    
+    def extract_features_and_centroids(self, **kwargs):
+        store_features = kwargs.get('store_features', True)
+        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
+        self.centroids = self.centroids_cal(train_data, **kwargs)        
+        feature_from = kwargs.get('store_features', 'train_data')        
+        if feature_from == 'val_data':
+            data = val_data
+        elif feature_from == 'test_data':
+            data = test_data
+        else:
+            data = train_data
+        total_features, total_preds, total_labels = [], [], []
+        for batch in data:
+            logseq_batch, label_batch = batch
+            features_batch = self.get_pretrained_features(logseq_batch, **kwargs)
+            label_indexs = tf.math.argmax(label_batch, axis=1)
+            label_index_np = label_indexs.numpy()
+            total_labels.append(label_index_np)
+            total_features.append(features_batch)
+        # y_pred = np.array(total_preds).flatten().tolist()
+        y_true = np.array(total_labels).flatten().tolist()
+        if store_features:
+            # self.total_preds = y_pred
+            self.total_labels = y_true
+            total_features = np.array(total_features)
+            total_features = np.reshape(total_features, ((total_features.shape[0] * total_features.shape[1]), total_features.shape[2])    ) 
+        self.total_features = total_features
+        self.plot_centroids(**kwargs)
         
-    
-    
     
     def train(self, **kwargs):          
         ### ### why is it needed ? #####################
@@ -82,10 +112,11 @@ class OpenSet:
         ###################################################################
         oc_optimizer = get_optimizer(kwargs.get('optimizer'), kwargs.get('oc_lr'))
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(log_obj, **kwargs)
-        oc_epochs = 1 if kwargs.get('oc_epochs') is None else kwargs.get('oc_epochs')
-        oc_wait = 3  if kwargs.get('oc_wait') is None else kwargs.get('oc_wait')
+        oc_epochs = kwargs.get('oc_epochs', 1)
+        oc_wait = kwargs.get('oc_wait', 3)
         # num_labels = train_data
-        self.num_classes = train_data.element_spec[1].shape[1] if kwargs.get('num_classes') is None else kwargs.get('num_classes') 
+        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
+        self.num_classes = num_classes
         lossfunction = BoundaryLoss(num_labels=self.num_classes)  
         ######### get centroids #############
         self.centroids = self.centroids_cal(data_train, **kwargs)  
@@ -138,8 +169,8 @@ class OpenSet:
         _, _, f1_weighted, f_measure = self.evaluate(train_data, ukc_label=self.ukc_label, store_features=True)
         
         # kwargs.update({})
-        self.plot_radius_chages(**kwargs)
-        self.plot_centroids(**kwargs)
+        self.plot_radius_chages(num_classes=num_classes, **kwargs)
+        self.plot_centroids()
         return self.losses, self.radius_changes
     
             
@@ -153,24 +184,25 @@ class OpenSet:
         return loss, self.radius
        
         
-    def get_pretrained_features(self, logseq_batch):
+    def get_pretrained_features(self, logseq_batch, **kwargs):
         if self.function_model is True:
             penultimate_layer = self.pretrained_model.layers[len(self.pretrained_model.layers) -2]
 #             features = penultimate_layer.output
         else:
-            features = self.pretrained_model(logseq_batch, extract_feature=True)
+            ptmodel = self.get_ptmodel(**kwargs)
+            features = ptmodel(logseq_batch, extract_feature=True)
         self.features = features
         return self.features
         
     def centroids_cal(self, data, **kwargs):
-        num_classes = kwargs.get('num_classes', 4) 
+        num_classes = kwargs.get('num_classes', data.element_spec[1].shape[1]) 
         embedding_size = kwargs.get('embedding_size', 16)        
         centroids = tf.zeros((num_classes, embedding_size))
         total_labels = tf.zeros(num_classes)
         for batch in data:
             logseq_batch, label_batch = batch
             ## (32, 32, 64), (32, 4)
-            features = self.get_pretrained_features(logseq_batch)
+            features = self.get_pretrained_features(logseq_batch, **kwargs)
             ## (32, 16) features - 32 sequence of line each haaving 64 characrers
             ## produces a feaure vector of dimension 16. 
             for i in range(len(label_batch)): # (32, 4) --> here length is 32
@@ -268,13 +300,13 @@ class OpenSet:
     
     
     def get_ptmodel(self, **kwargs):
-        self.ptmodel = self.ptmodel if kwargs.get('ptmodel') is None else kwargs.get('ptmodel')
-        mode = 'train' if kwargs.get('mode') is None else kwargs.get('mode')
+        self.ptmodel = kwargs.get('ptmodel', self.ptmodel)
+        ptmodel_get_mode =  kwargs.get('ptmodel_get_mode', 'train')
         if self.ptmodel is None:
-            if mode == 'import':
+            if ptmodel_get_mode == 'import':
                 self.ptmodel = self.import_ptmodel(**kwargs)
             else:
-                self.ptmodel = self.train_ptmodel(**kwargs)
+                self.ptmodel, hist, filepath = self.train_ptmodel(**kwargs) #ptmodel, hist, filepath
         return self.ptmodel
     
     def import_ptmodel(self, **kwargs):
@@ -354,18 +386,18 @@ class OpenSet:
         return ptmodel, hist, filepath
     
     def get_or_generate_dataset(self, **kwargs):
-        bg_class_obj = kwargs.get('bg_class_obj')
+        bg_class_obj = kwargs.get('bg_class_obj', BGLog)
         bglog = kwargs.get('bglog')
         train_data = kwargs.get('train_data')
         val_data = kwargs.get('val_data')
         test_data = kwargs.get('test_data')
         data_tuple = (bglog, train_data, val_data, test_data)         
         if all(data_tuple):
-            print('all all the dataset')
+            print('got all the dataset')
         elif not all(data_tuple) and bg_class_obj is not None:
             train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
         else: ####not all(data_tuple) and  bg_class_obj is None:
-            msg = f'you must either input all four of:  {data_tuple} or bg_class_obj to gnerate all four'
+            msg = f'you must either input all four of bglog, train_data, val_data, test_data or bg_class_obj to gnerate all four, received:  {data_tuple} '
             print(msg)
             raise OCException(message=msg)
         return train_data, val_data,  test_data, bglog      
@@ -444,23 +476,23 @@ class OpenSet:
         
         
     def plot_radius_chages(self, **kwargs):
-        perplexity = kwargs.get('perplexity', 200)
-        early_exaggeration = kwargs.get('early_exaggeration', 12)
-        random_state = kwargs.get('random_state', 123)
-        tsne_lr = kwargs.get('tsne_lr', 80)
-        feature_pic_size = kwargs.get('feature_pic_size', 20)
-        centroid_pic_size = kwargs.get('centroid_pic_size', 200)
+        # perplexity = kwargs.get('perplexity', 200)
+        # early_exaggeration = kwargs.get('early_exaggeration', 12)
+        # random_state = kwargs.get('random_state', 123)
+        # tsne_lr = kwargs.get('tsne_lr', 80)
+        radius_pic_size = kwargs.get('radius_pic_size', 20)
+        num_classes = kwargs.get('num_classes')
         
         narr = np.array([elem.numpy() for elem in self.radius_changes])
         tnsr = tf.convert_to_tensor(narr)        
         tpose = tf.transpose(tnsr)
-        radius = [tpose.numpy()[0][i] for i in range(self.num_classes)]
+        radius = [tpose.numpy()[0][i] for i in range(num_classes)]
         losses = [elem.numpy() for elem in self.losses]
         f1_tr = np.array(self.f1_tr_lst) * 100
         val_tr = np.array(self.f1_val_lst) * 100        
         f1_scores = [f1_tr, val_tr]
         f1_scores = pd.DataFrame({'train':f1_tr, 'val': val_tr})        
-        plt.figure(figsize=self.figsize)
+        plt.figure(figsize=radius_pic_size)
         plt.subplot(1, 2, 1) # 1 row 2 column , first plot
         fig3a = sns.lineplot(data=radius)
         plt.legend(loc=0)
@@ -477,23 +509,28 @@ class OpenSet:
         plt.show()
         
     def plot_centroids(self, **kwargs ):       
-        total_features = kwargs.get('total_features', self.total_features) 
-        total_preds = kwargs.get('total_preds', self.total_preds) 
-        row = kwargs.get('perplexity', 1)
-        col = kwargs.get('perplexity', 1) 
-        fig = kwargs.get('perplexity', 1)  
+        total_features = kwargs.get('total_features', self.total_features)        
+        total_preds = kwargs.get('total_preds', self.total_preds)        
+        total_labels = kwargs.get('total_labels', self.total_labels)
+        use_labels = kwargs.get('use_labels', total_labels)        
+        row = kwargs.get('row', 1)
+        col = kwargs.get('col', 1) 
+        fig = kwargs.get('fig', 1)  
         perplexity = kwargs.get('perplexity', 200)
         early_exaggeration = kwargs.get('early_exaggeration', 12)
         random_state = kwargs.get('random_state', 123)
         tsne_lr = kwargs.get('tsne_lr', 80)
         feature_pic_size = kwargs.get('feature_pic_size', 20)
-        centroid_pic_size = kwargs.get('centroid_pic_size', 200)              
+        centroid_pic_size = kwargs.get('centroid_pic_size', 200) 
+        centroid_class_color = kwargs.get('centroid_class_color', False) 
+        manual_color_map = kwargs.get('manual_color_map', False)
+        fixed_color_maps = np.array(["green","blue","yellow","pink","black","orange","purple","red","beige","brown","gray","cyan","magenta"])
         
         a = np.array(total_features)
         c = self.centroids.numpy()
-        p = np.array(total_preds)
-        tsne = TSNE(perplexity=self.perplexity, early_exaggeration=self.early_exaggeration, 
-                    random_state=self.random_state, learning_rate=self.learning_rate)
+        p = np.array(use_labels)
+        tsne = TSNE(perplexity=perplexity, early_exaggeration=early_exaggeration, 
+                    random_state=random_state, learning_rate=tsne_lr)
         tout = tsne.fit_transform(a)
         cout = tsne.fit_transform(c)
         m_scaler = MinMaxScaler()
@@ -504,13 +541,23 @@ class OpenSet:
         scaled_cout = s_scalar.fit_transform(cout)
         
         ax5 = plt.subplot(row, col, fig) # # 1 row 2 column , 2nd plot
-        fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=self.feature_pic_size, cmap='tab10', )
+        if manual_color_map:
+            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=fixed_color_maps[p], s=20, cmap='tab10',)
+        else:
+            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=feature_pic_size, cmap='tab10', )
         legend1 = ax5.legend(*fig5.legend_elements(),
                             loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
         ax5.add_artist(legend1)
+        
         cmap_1 = fig5.get_cmap().colors
         ccolor = np.array([cmap_1[i] for i in  range(len(c))])
-        ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=self.centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
+        if centroid_class_color:
+            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
+        elif manual_color_map:
+            ccolor = np.array([i for i in  range(len(c))])
+            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')
+        else:
+            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=centroid_pic_size, c='black', cmap='tab10', marker=r'd', edgecolors= 'k')
         ax5.set_xlabel("class features and their centroids")
         plt.show()
 

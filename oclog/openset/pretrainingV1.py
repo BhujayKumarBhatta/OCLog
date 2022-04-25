@@ -35,6 +35,7 @@ class LogLineEncoder(tf.keras.Model):
                  kernel_size=3, char_embedding_size=None):
         super().__init__()  
         self.logobj = logobj
+        # self.chars_in_line = train_data.element_spec[0].shape[2]
         self.chars_in_line = chars_in_line
         self.num_of_conv1d = num_of_conv1d       
         self.filters = filters

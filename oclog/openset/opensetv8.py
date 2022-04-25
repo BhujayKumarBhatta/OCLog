@@ -41,7 +41,7 @@ class OpenSet:
     def __init__(self, ptmodel=None, function_model=False):
 #         super().__init__():
         
-        self.ptmodel = ptmodel
+        # self.ptmodel = ptmodel
         self.centroids = None       
         self.radius = None      
         self.radius_changes = []
@@ -57,8 +57,8 @@ class OpenSet:
         self.pred_radius = None
         self.unknown = None
         self.best_eval_score = 0
-        self.ukc_label = ukc_label
-        self.pretrain_hist = pretrain_hist
+        # self.ukc_label = ukc_label
+        # self.pretrain_hist = pretrain_hist
         self.figsize = (20, 12)
         self.epoch = 0
         self.best_train_score = 0
@@ -67,9 +67,12 @@ class OpenSet:
        
         self.ptmodel_name = 'ptmodel'
         self.data_dir = 'data'
-        self.save_dir = self.data_dir
+        # self.save_dir = self.data_dir
         self.ptmodel_path = None
         self.num_classes = None
+        self.tf_random_seed = 1234
+        
+    
     
     
     def train(self, **kwargs):          
@@ -262,28 +265,7 @@ class OpenSet:
             print(cls_report)
             self.plot_centroids(total_features, total_preds)
         return y_true, y_pred, f1_weighted, f_measure
-        
-        
-    def F_measure(self, cm):
-        idx = 0
-        rs, ps, fs = [], [], []
-        n_class = cm.shape[0]
-        for idx in range(n_class):
-            TP = cm[idx][idx]
-            r = TP / cm[idx].sum() if cm[idx].sum() != 0 else 0
-            p = TP / cm[:, idx].sum() if cm[:, idx].sum() != 0 else 0
-            f = 2 * r * p / (r + p) if (r + p) != 0 else 0
-            rs.append(r * 100)
-            ps.append(p * 100)
-            fs.append(f * 100)
-        f = np.mean(fs).round(4)
-        f_seen = np.mean(fs[:-1]).round(4)
-        f_unseen = round(fs[-1], 4)
-        result = {}
-        result['Known'] = f_seen
-        result['Open'] = f_unseen
-        result['F1-score'] = f
-        return result
+    
     
     def get_ptmodel(self, **kwargs):
         self.ptmodel = self.ptmodel if kwargs.get('ptmodel') is None else kwargs.get('ptmodel')
@@ -295,8 +277,12 @@ class OpenSet:
                 self.ptmodel = self.train_ptmodel(**kwargs)
         return self.ptmodel
     
-    def import_ptmodel(self, **kwargs):        
-        self.ptmodel_path = self.ptmodel_path if kwargs.get('ptmodel_path') is None else kwargs.get('ptmodel_path')
+    def import_ptmodel(self, **kwargs):
+        ''' after the training is completed this class will have the latest and best ptmodel_path
+        if you want to load any specific saved model or load a saved model without training use the
+        parameter ptmodel_path to provide the full or relative path e.g. data\ptmodel_2022-04-25_07_08_47.426755/ 
+        or full path.'''
+        self.ptmodel_path = kwargs.get('ptmodel_path', self.ptmodel_path)
         print(f'importing model: {self.ptmodel_path}')
         self.ptmodel = load_model(self.ptmodel_path)
         return self.ptmodel
@@ -305,8 +291,8 @@ class OpenSet:
         bglog = kwargs.get('bglog')
         train_data = kwargs.get('train_data')
         val_data = kwargs.get('val_data')
-        chars_in_line = kwargs.get('chars_in_line', 64)
-        line_in_seq = kwargs.get('line_in_seq', 32)
+        chars_in_line = kwargs.get('chars_in_line', train_data.element_spec[0].shape[2])
+        line_in_seq = kwargs.get('line_in_seq', train_data.element_spec[0].shape[1])
         char_embedding_size = kwargs.get('char_embedding_size') # if None self.vocabulary_size will be used by the LogLineEncoder         
         pt_optimizer = kwargs.get('pt_optimizer', 'adam')
         pt_loss = kwargs.get('pt_loss', 'categorical_crossentropy')
@@ -319,21 +305,9 @@ class OpenSet:
             train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
         line_encoder = LogLineEncoder(bglog, chars_in_line=chars_in_line, char_embedding_size=char_embedding_size,)
         log_seqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=embedding_size)
-        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=self.num_classes)
+        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=num_classes)
         ptmodel_arch.compile(optimizer=pt_optimizer, loss=pt_loss, metrics=pt_metrics)
-        return ptmodel_arch    
-    
-    def get_or_generate_dataset(self, log_obj, **kwargs):
-        bglog = kwargs.get('bglog')
-        msg = 'you must input log object '
-        if bglog is None:
-            print(msg)
-            raise OCException(message=msg)
-        train_data = kwargs.get('train_data')
-        val_data = kwargs.get('val_data')
-        if  train_data is None or val_data is None:
-            train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
-        return train_data, val_data,  test_data, bglog        
+        return ptmodel_arch 
     
     
     def train_ptmodel(self, **kwargs, ):        
@@ -345,11 +319,11 @@ class OpenSet:
         save_ptmodel = kwargs.get('save_ptmodel', True)
         pt_wait = kwargs.get('pt_wait', 3)
         pt_epochs = kwargs.get('pt_epochs', 5)
-        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(log_obj, **kwargs)
+        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
         print(datetime.datetime.now())
         print('starting to create {} automatically'.format(ptmodel_name))
         curr_dt_time = datetime.datetime.now()
-        model_name = self.ptmodel_name + '_init_' + str(curr_dt_time).replace(' ','').replace(':','_') + '/'
+        model_name = self.ptmodel_name + '_' + str(curr_dt_time).replace(' ','_').replace(':','_') + '/'
         if not os.path.exists(self.save_dir):
             os.mkdir(self.save_dir)
         # model_name = os.path.join(self.save_dir, model_name) 
@@ -378,10 +352,28 @@ class OpenSet:
         self.pretrained_model = ptmodel
         self.ptmodel_path = filepath
         return ptmodel, hist, filepath
+    
+    def get_or_generate_dataset(self, **kwargs):
+        bg_class_obj = kwargs.get('bg_class_obj')
+        bglog = kwargs.get('bglog')
+        train_data = kwargs.get('train_data')
+        val_data = kwargs.get('val_data')
+        test_data = kwargs.get('test_data')
+        data_tuple = (bglog, train_data, val_data, test_data)         
+        if all(data_tuple):
+            print('all all the dataset')
+        elif not all(data_tuple) and bg_class_obj is not None:
+            train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
+        else: ####not all(data_tuple) and  bg_class_obj is None:
+            msg = f'you must either input all four of:  {data_tuple} or bg_class_obj to gnerate all four'
+            print(msg)
+            raise OCException(message=msg)
+        return train_data, val_data,  test_data, bglog      
       
     
-    def get_bgdata(self, bglog_model, **kwargs ):
-        bglog = bglog_model(**kwargs)
+    def get_bgdata(self, **kwargs ):
+        bg_class_obj = kwargs.get('bg_class_obj')
+        bglog = bg_class_obj(**kwargs)
         train_test = bglog.get_tensor_train_val_test(**kwargs)
         train_data, val_data,  test_data = train_test
         return train_data, val_data,  test_data, bglog
@@ -408,6 +400,27 @@ class OpenSet:
             print(f'unknown optimizer {optimizer}. assigning default as adam')
             optimizer = tf.keras.optimizers.Adam()
         return optimizer
+    
+    def F_measure(self, cm):
+        idx = 0
+        rs, ps, fs = [], [], []
+        n_class = cm.shape[0]
+        for idx in range(n_class):
+            TP = cm[idx][idx]
+            r = TP / cm[idx].sum() if cm[idx].sum() != 0 else 0
+            p = TP / cm[:, idx].sum() if cm[:, idx].sum() != 0 else 0
+            f = 2 * r * p / (r + p) if (r + p) != 0 else 0
+            rs.append(r * 100)
+            ps.append(p * 100)
+            fs.append(f * 100)
+        f = np.mean(fs).round(4)
+        f_seen = np.mean(fs[:-1]).round(4)
+        f_unseen = round(fs[-1], 4)
+        result = {}
+        result['Known'] = f_seen
+        result['Open'] = f_unseen
+        result['F1-score'] = f
+        return result
     
     def plot_pretrain_result(self, hist, **kwargs):
         figsize = kwargs.get('figsize',  (20, 6))

@@ -5,4 +5,7 @@ oclog/data
 .ipynb_checkpoints
 __pycahce__
 save_path
-
+oclog/openset/notebooks/data
+oclog\openset\notebooks\data
+oclog\BGL\data
+oclog/BGL/data

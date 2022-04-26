@@ -35,7 +35,9 @@ from tensorflow.keras.models import  load_model
 
 
 class OpenSet:
-    '''     
+    '''  
+    init attributes cleaned up
+    TODO: update tracker with pttime and octime and notebook name
     '''
     def __init__(self, function_model=False):
         self.ptmodel = None
@@ -50,11 +52,6 @@ class OpenSet:
         self.total_features = []
         self.total_preds = []
         self.total_labels = []
-        self.pred_eudist = None
-        self.pred_radius = None
-        self.unknown = None
-        self.best_eval_score = 0
-        self.figsize = (20, 12)
         self.epoch = 0
         self.best_train_score = 0
         self.best_val_score = 0
@@ -712,6 +709,6 @@ class OCException(Exception):
         
         
 '''
-TODO: update tracker with pttime and octime and notebook name
+
 
 '''

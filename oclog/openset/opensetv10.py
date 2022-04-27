@@ -38,6 +38,7 @@ class OpenSet:
     '''  
     init attributes cleaned up
     TODO: update tracker with pttime and octime and notebook name
+    TODO: excel cols to be reorganized
     '''
     def __init__(self, function_model=False):
         self.ptmodel = None
@@ -99,6 +100,7 @@ class OpenSet:
     def train(self, **kwargs):
         ### ### calculate centroid  after each ephochs after a fresh training############ 
         ###################################################################
+        start_time = time.time()
         debug = kwargs.get('oc_optimizer', False)
         oc_optimizer = kwargs.get('oc_optimizer')
         oc_lr = kwargs.get('oc_lr', 2)
@@ -170,7 +172,7 @@ class OpenSet:
             self.epoch = epoch
         self.radius = best_radius
         # self.centroids = best_centroids 
-        
+        oc_tr_time = time.time() - start_time
         
         # kwargs.update({})
         self.plot_radius_chages(num_classes=num_classes, **kwargs)        
@@ -180,12 +182,18 @@ class OpenSet:
         print('classification report for test data:')
         ##### hence store_features is true and plotting the centroid with the test features and test labels
         _, _, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=ukc_label, store_features=True)
+        centroid_plot_start = time.time()
         self.plot_centroids(use_labels=self.total_preds, **kwargs)
+        centroid_plot_time = time.time() - centroid_plot_start
+        total_oc_time = time.time() - start_time
         self.tracker.update({'oc_epochs': oc_epochs, 'oc_wait': oc_wait, 'oc_lr': oc_lr, 'oc_optimizer': oc_optimizer,
-                            }, **kwargs)
+        
+                            'oc_tr_time': oc_tr_time, 'centroid_plot_start': centroid_plot_start,
+                            'total_oc_time': total_oc_time}, **kwargs)
         if update_tracker:
             self.update_tracker('mytest.xlsx', self.tracker)
         self.save_oc_model(**kwargs)
+        
         return self.losses, self.radius_changes  
     
             
@@ -373,7 +381,8 @@ class OpenSet:
         return ptmodel_arch 
     
     
-    def train_ptmodel(self, **kwargs, ):        
+    def train_ptmodel(self, **kwargs, ):
+        start_time = time.time()
         ptmodel = self.get_ptmodel_arch(**kwargs)
         ptmodel_name = kwargs.get('ptmodel_name', 'ptmodel')
         monitor_metric = kwargs.get('monitor_metric', 'accuracy')
@@ -415,8 +424,10 @@ class OpenSet:
         self.plot_pretrain_result(hist) 
         self.pretrained_model = ptmodel
         self.ptmodel_path = filepath
+        pt_time = time.time() - start_time
         self.tupdate({'ptmodel_name': ptmodel_name, 'data_dir': self.data_dir, 'save_ptmodel': save_ptmodel, 'pt_wait': pt_wait,
-                            'pt_epochs':pt_epochs,  'ptmodel_path': filepath}, run_id_print=True, **kwargs)
+                            'pt_epochs':pt_epochs,  'ptmodel_path': filepath,
+                     'pt_time': pt_time}, run_id_print=True, **kwargs)
         return ptmodel, hist, filepath
     
     
@@ -570,7 +581,21 @@ class OpenSet:
         plt.show()
         
         
-    def plot_centroids(self, **kwargs ):       
+    def plot_centroids(self, **kwargs ):
+        '''
+        https://distill.pub/2016/misread-tsne/
+        https://arxiv.org/abs/1712.09005
+        https://www.jmlr.org/papers/volume9/vandermaaten08a/vandermaaten08a.pdf  - original paper
+        https://stats.stackexchange.com/questions/263539/clustering-on-the-output-of-t-sne
+        https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
+        
+        From original paper:
+        t-SNE has a computational and memory complexity that is quadratic in the number of datapoints.This makes it infeasible to apply the standard version of t-SNE to datasets that contain many more than,say, 10,000 points.
+        
+        It is thereforecommontoruntheoptimizationseveraltimesona datasettofindappropriatevaluesfortheparameters
+        
+        (1)it is unclearhow t-SNEperformsongeneraldimensionalityreductiontasks,(2)therelativelylocalnatureoft-SNEmakesit sensitive to thecurseoftheintrinsicdimensionalityofthedata,and(3)t-SNEis notguaranteedtoconvergetoa globaloptimumofitscostfunction.Below, wediscussthethreeweaknessesinmoredetail
+        '''
         total_features = kwargs.get('total_features', self.total_features)        
         total_preds = kwargs.get('total_preds', self.total_preds)        
         total_labels = kwargs.get('total_labels', self.total_labels)
@@ -578,10 +603,12 @@ class OpenSet:
         row = kwargs.get('row', 1)
         col = kwargs.get('col', 1) 
         fig = kwargs.get('fig', 1)  
-        perplexity = kwargs.get('perplexity', 200)
-        early_exaggeration = kwargs.get('early_exaggeration', 12)
-        random_state = kwargs.get('random_state', 123)
+        tsne_perplexity = kwargs.get('tsne_perplexity', 200)
+        tsne_early_exaggeration = kwargs.get('tsne_early_exaggeration', 12)
+        tsne_random_state = kwargs.get('tsne_random_state', 123)
         tsne_lr = kwargs.get('tsne_lr', 80)
+        tsne_n_iter = kwargs.get('tsne_n_iter', 1000)
+        tsne_n_iter_without_progress = kwargs.get('tsne_n_iter_without_progress', 300)
         feature_pic_size = kwargs.get('feature_pic_size', 20)
         centroid_pic_size = kwargs.get('centroid_pic_size', 200) 
         centroid_class_color = kwargs.get('centroid_class_color', False) 
@@ -590,13 +617,14 @@ class OpenSet:
         fixed_color_maps = np.array(["green","blue","yellow","pink","black","orange","purple",
                                      "red","beige","brown","gray","cyan","magenta"])
         
-        a = np.array(total_features)
-        c = self.centroids.numpy()
-        p = np.array(use_labels)
-        tsne = TSNE(perplexity=perplexity, early_exaggeration=early_exaggeration, 
-                    random_state=random_state, learning_rate=tsne_lr)
-        tout = tsne.fit_transform(a)
-        cout = tsne.fit_transform(c)
+        features = np.array(total_features)
+        centroids = self.centroids.numpy()
+        labels = np.array(use_labels)
+        tsne = TSNE(perplexity=tsne_perplexity, early_exaggeration=tsne_early_exaggeration, 
+                    random_state=tsne_random_state, learning_rate=tsne_lr, n_iter=tsne_n_iter,
+                   n_iter_without_progress=tsne_n_iter_without_progress)
+        tout = tsne.fit_transform(features)
+        cout = tsne.fit_transform(centroids)
         m_scaler = MinMaxScaler()
         s_scalar = StandardScaler()
         # scaled_tout = m_scaler.fit_transform(tout)
@@ -606,19 +634,19 @@ class OpenSet:
         
         ax5 = plt.subplot(row, col, fig) # # 1 row 2 column , 2nd plot
         if manual_color_map:
-            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=fixed_color_maps[p], s=20, cmap='tab10',)
+            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=fixed_color_maps[labels], s=20, cmap='tab10',)
         else:
-            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=p, s=feature_pic_size, cmap='tab10', )
+            fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=labels, s=feature_pic_size, cmap='tab10', )
         legend1 = ax5.legend(*fig5.legend_elements(),
                             loc="upper left", title="Classes",  bbox_to_anchor=(1.05, 1))
         ax5.add_artist(legend1)
         
         cmap_1 = fig5.get_cmap().colors
-        ccolor = np.array([cmap_1[i] for i in  range(len(c))])
+        ccolor = np.array([cmap_1[i] for i in  range(len(centroids))])
         if centroid_class_color:
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black is False:
-            ccolor = np.array([i for i in  range(len(c))])
+            ccolor = np.array([i for i in  range(len(centroids))])
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black:            
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c='black', cmap='tab10', marker=r'd', edgecolors= 'k')

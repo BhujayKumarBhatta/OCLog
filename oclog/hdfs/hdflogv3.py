@@ -21,13 +21,37 @@ tf.random.set_seed(123)
 class HDFSLogv3:
     
     def __init__(self, **kwargs ):
+        
+        #### either parameters or methods will assign them ###########
+        self.hdfs_logpath = kwargs.get('hdfs_logpath', 'C:\ML_data\Logs')
+        self.hdfs_logfilename = kwargs.get('hdfs_logfilename', 'HDFS.log')       
+        self.hdfs_labelpath = kwargs.get('hdfs_labelpath', 'C:\ML_data\Logs')
+        self.hdfs_labelfilename = kwargs.get('hdfs_labelfilename', 'anomaly_label.csv') 
+        
+        self.hdfs_rm_time_stamp = kwargs.get('hdfs_rm_time_stamp', True)        
+        self.hdfs_rm_blk_ids_regex = kwargs.get('hdfs_rm_blk_ids_regex', True) 
+        self.hdfs_rm_ip_address = kwargs.get('hdfs_rm_ip_address', True) 
+        self.hdfs_rm_msg_source = kwargs.get('hdfs_rm_msg_source', True) 
+        self.padded_char_len = kwargs.get('padded_char_len', 64)
+        self.padding_style_char = kwargs.get('padding_style_char', 'post')
+        self.truncating_style_char = kwargs.get('truncating_style_char', 'pre') 
+        self.padded_seq_len = kwargs.get('padded_seq_len', 32)
+        self.padding_style_seq = kwargs.get('padding_style_seq', 'post')
+        self.truncating_style_seq = kwargs.get('truncating_style_seq', 'pre')
+        # self.hdfs_labelpath = kwargs.get('hdfs_labelpath', 'C:\ML_data\Logs')
+        # self.hdfs_labelfilename = kwargs.get('hdfs_labelfilename', 'anomaly_label.csv') 
+        self.hdfs_rm_signs_n_punctuations = kwargs.get('hdfs_rm_signs_n_punctuations', True)
+        self.hdfs_rm_white_space = kwargs.get('hdfs_rm_white_space', True)        
+        self.hdfs_obj_save_path = kwargs.get('hdfs_obj_save_path', 'data')
+        self.debug = kwargs.get('debug', False)
+        
+        #### methods will assign them #####
         self.tk = None    
         self.lebeled_num_seq_df_epn = None
-        self.train_df = None
-        self.val_df = None
-        self.test_df = None
         self.hdfs_saved_obj_name = None
-        self.debug = kwargs.get('debug', False)
+        
+        
+        
     
     ### 1st - done
     def get_log_lines(self, **kwargs):
@@ -36,8 +60,8 @@ class HDFSLogv3:
         hdfs_logfilename = 'HDFS.log'        
         '''
         st_time = time.time()
-        hdfs_logpath = kwargs.get('hdfs_logpath', 'C:\ML_data\Logs')
-        hdfs_logfilename = kwargs.get('hdfs_logfilename', 'HDFS.log')
+        hdfs_logpath = kwargs.get('hdfs_logpath', self.hdfs_logpath)
+        hdfs_logfilename = kwargs.get('hdfs_logfilename', self.hdfs_logfilename)
         hdfs_logfile = os.path.join(hdfs_logpath, hdfs_logfilename)
         with open(hdfs_logfile, 'r', encoding='utf8') as f:
             logs = f.readlines()
@@ -64,13 +88,17 @@ class HDFSLogv3:
         hdfs_rm_white_space = True
         '''
         # if debug:
-        #     print(f'original Line: {txt_line}, original length: {len(txt_line)}' )        
-        hdfs_rm_time_stamp = kwargs.get('hdfs_rm_time_stamp', True)
-        hdfs_rm_msg_source = kwargs.get('hdfs_rm_msg_source', True)
-        hdfs_rm_blk_ids_regex = kwargs.get('hdfs_rm_blk_ids_regex', True)
-        hdfs_rm_ip_address = kwargs.get('hdfs_rm_ip_address', True)
-        hdfs_rm_signs_n_punctuations = kwargs.get('hdfs_rm_signs_n_punctuations', True)
-        hdfs_rm_white_space = kwargs.get('hdfs_rm_white_space', True)        
+        #     print(f'original Line: {txt_line}, original length: {len(txt_line)}' ) 
+        hdfs_rm_time_stamp = kwargs.get('hdfs_rm_time_stamp', self.hdfs_rm_time_stamp)
+        self.hdfs_rm_time_stamp = hdfs_rm_time_stamp ### will be used later for creating name of the pickle file
+        
+        hdfs_rm_msg_source = kwargs.get('hdfs_rm_msg_source', self.hdfs_rm_msg_source)
+        hdfs_rm_blk_ids_regex = kwargs.get('hdfs_rm_blk_ids_regex', self.hdfs_rm_blk_ids_regex)
+        hdfs_rm_ip_address = kwargs.get('hdfs_rm_ip_address', self.hdfs_rm_ip_address)
+        self.hdfs_rm_ip_address = hdfs_rm_ip_address  ### will be used later for creating name of the pickle file
+        
+        hdfs_rm_signs_n_punctuations = kwargs.get('hdfs_rm_signs_n_punctuations', self.hdfs_rm_signs_n_punctuations)
+        hdfs_rm_white_space = kwargs.get('hdfs_rm_white_space', self.hdfs_rm_white_space)        
         time_stamp = ''
         msg_source = ''
         blk_ids_regex = ''
@@ -113,7 +141,7 @@ class HDFSLogv3:
                 continue
             blkId_set = set(blkId_list)
             for blk_Id in blkId_set:
-                tup = (blk_Id, self.remove_unwanted_characters_n_words(line))
+                tup = (blk_Id, self.remove_unwanted_characters_n_words(line, **kwargs))
                 cleaned_logs.append(tup)
         # self.cleaned_logs = cleaned_logs
         end_time = time.time()
@@ -167,9 +195,10 @@ class HDFSLogv3:
         truncating_style_char = kwargs.get('truncating_style_char', 'pre')    
         '''
        
-        padded_char_len = kwargs.get('padded_char_len', 64)
-        padding_style_char = kwargs.get('padding_style_char','post')
-        truncating_style_char = kwargs.get('truncating_style_char', 'pre')        
+        padded_char_len = kwargs.get('padded_char_len', self.padded_char_len)
+        self.padded_char_len = padded_char_len ### since this will be used in the name of pickle file 
+        padding_style_char = kwargs.get('padding_style_char', self.padding_style_char)
+        truncating_style_char = kwargs.get('truncating_style_char', self.truncating_style_char)        
                     
         if self.tk is None:
             tk =  self.train_char_tokenizer()
@@ -196,24 +225,7 @@ class HDFSLogv3:
         # self.blkid_to_line_to_num = blkid_to_line_to_num
         return blkid_to_line_to_num
     
-       
-    
-    ### 7th - done
-    # def get_num_sequence_by_blkid(self, blkid_to_line_to_num, **kwargs):
-    #     # blkid_to_line_to_num = self.convert_char_to_numbers()
-    #     st_time = time.time()        
-    #     od = OrderedDict()
-    #     for k, v in blkid_to_line_to_num:
-    #         if k not in od:
-    #             od[k] = []
-    #         od[k].append(v)
-    #     num_sequence_by_blkid = od
-    #     end_time = time.time()
-    #     if self.debug:
-    #         print('ending num_sequence_by_blkid conversion:' , end_time - st_time)        
-    #         print('RAM usage: ', sys.getsizeof(blkid_to_line_to_num))
-    #     return num_sequence_by_blkid
-    
+        
     
     ### 8th - done 
     def get_num_seq_by_blkid_itertools(self, blkid_to_line_to_num, **kwargs):
@@ -248,11 +260,13 @@ class HDFSLogv3:
         '''
         
         st_time = time.time()        
-        padded_seq_len = kwargs.get('padded_seq_len', 32)
-        padding_style_seq = kwargs.get('padding_style_seq', 'post')
-        truncating_style_seq = kwargs.get('truncating_style_seq','pre')
-        hdfs_labelpath = kwargs.get('hdfs_labelpath', 'C:\ML_data\Logs')
-        hdfs_labelfilename = kwargs.get('hdfs_labelfilename', 'anomaly_label.csv')        
+        padded_seq_len = kwargs.get('padded_seq_len', self.padded_seq_len)
+        self.padded_seq_len = padded_seq_len ### since this will be used while saving the pickle file
+        padding_style_seq = kwargs.get('padding_style_seq', self.padding_style_seq)
+        self.padding_style_seq = padding_style_seq
+        truncating_style_seq = kwargs.get('truncating_style_seq', self.truncating_style_seq)
+        hdfs_labelpath = kwargs.get('hdfs_labelpath', self.hdfs_labelpath)
+        hdfs_labelfilename = kwargs.get('hdfs_labelfilename', self.hdfs_labelfilename)        
         hdfs_lalbelfile = os.path.join(hdfs_labelpath, hdfs_labelfilename)
         # num_seq_by_blkid_itertools = self.get_num_seq_by_blkid_itertools()
         ######### changes: chaging the column name  as per bgl log  ##################
@@ -324,30 +338,39 @@ class HDFSLogv3:
     
     
     def get_train_test_split_single_class(self, label=0, **kwargs):
+        '''
+        ablation = 1000
+        train_ratio = 0.8
+        val_ratio = None
+        test_ratio = None
+        '''
+        ablation = kwargs.get('ablation', 1000)
         train_ratio = kwargs.get('train_ratio', 0.8)
-        # hdfsdf = self.lebeled_num_seq_df_epn
-        # if self.lebeled_num_seq_df_epn is None: 
-        #     hdfsdf = self.get_lebeled_num_seq_df_epn(**kwargs)
+        val_ratio = kwargs.get('val_ratio', None)
+        test_ratio = kwargs.get('test_ratio', None)
+        hdfsdf = self.lebeled_num_seq_df_epn
+        if hdfsdf is None: 
+            hdfsdf = self.get_lebeled_num_seq_df_epn(**kwargs)
         train_data = None
         val_data = None
         test_data = None
-        train_cnt = round(self.ablation * self.train_ratio)#### 1000 * 0.7 = 700
-        remaining_cnt = round(self.ablation *(1 - self.train_ratio)) ### 1000 * (1-0.7) = 300 
-        if self.val_ratio is None and self.test_ratio is None:
+        train_cnt = round(ablation * train_ratio)#### 1000 * 0.7 = 700
+        remaining_cnt = round(ablation *(1 - train_ratio)) ### 1000 * (1-0.7) = 300 
+        if val_ratio is None and test_ratio is None:
             val_cnt = test_cnt = remaining_cnt//2 ### 300/2 = 150 each
         else:
-            val_cnt = round(self.ablation * self.val_ratio) ### 1000 * 0.2 = 200 
-            test_cnt = round(self.ablation * self.test_ratio) ### 1000 * 0.1 = 100
+            val_cnt = round(ablation * val_ratio) ### 1000 * 0.2 = 200 
+            test_cnt = round(ablation * test_ratio) ### 1000 * 0.1 = 100
         
         cls_data = hdfsdf[hdfsdf.label==label]
         cls_data_cnt = cls_data.count()[0]
-        cls_unique_label = int(np.unique(cls_data.label)[0])
+        # cls_unique_label = np.unique(cls_data.label)[0]
         #if self.debug: print('cls_unique_label', cls_unique_label)
-        if self.ablation <= cls_data_cnt: ### if 1000 <= 2000            
+        if ablation <= cls_data_cnt: ### if 1000 <= 2000            
                 train_data = cls_data[0:train_cnt] ### cls_data[0:700]
                 val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
-                test_data = cls_data[train_cnt+val_cnt:self.ablation] ### cls_data[900:1000]
-        elif self.ablation > cls_data_cnt and cls_data_cnt >= train_cnt+val_cnt: ### 1000>950 and 950>(700+200)
+                test_data = cls_data[train_cnt+val_cnt:ablation] ### cls_data[900:1000]
+        elif ablation > cls_data_cnt and cls_data_cnt >= train_cnt+val_cnt: ### 1000>950 and 950>(700+200)
             train_data = cls_data[0:train_cnt] ### cls_data[0:700]
             remaining_for_test = cls_data_cnt - (train_cnt+val_cnt) ### 950 - (700+200) = 50
             if remaining_for_test > 0: ### 50 > 0
@@ -371,12 +394,12 @@ class HDFSLogv3:
     def get_train_test_multi_class(self, **kwargs):       
         classes=['hdfs_anomaly', 'hdfs_normal']        
         hdfsdf = self.lebeled_num_seq_df_epn
-        if self.lebeled_num_seq_df_epn is None: 
+        if hdfsdf is None: 
             hdfsdf = self.get_lebeled_num_seq_df_epn(**kwargs)
             
         train_data, val_data, test_data = [], [], []
         for class_name in classes:
-                trdata, valdata, tsdata = self.get_train_test_split_single_class(label=class_name)
+                trdata, valdata, tsdata = self.get_train_test_split_single_class(label=class_name, **kwargs)
                 if trdata is not None: train_data.append(trdata)
                 if valdata is not None: val_data.append(valdata)
                 if tsdata is not None: test_data.append(tsdata)
@@ -410,11 +433,11 @@ class HDFSLogv3:
         # print(y_val[:2])
         x_test = list(binary_test_df.seq.values)     
         y_test = list(binary_test_df.label.values)
-        unique_label_train = np.unique(self.train_df.label)
-        max_label_num_train = max(unique_label_train)
-        ukc_label = str(int(max_label_num_train)+1)
-        self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=ukc_label
-        y_test = to_categorical(y_test)        
+        # unique_label_train = np.unique(binary_train_df.label)
+        # max_label_num_train = max(unique_label_train)
+        # ukc_label = str(int(max_label_num_train)+1)
+        # self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=ukc_label
+        # y_test = to_categorical(y_test)        
         train_test_binary = x_train, y_train, x_val, y_val, x_test, y_test
         return train_test_binary
     
@@ -425,18 +448,21 @@ class HDFSLogv3:
         params: batch_size = 32
         returns tensorflow dataset
         '''
-        ablation = kwargs.get('ablation', 1000)
-        train_test_binary = self.get_train_test_binary(**kwargs)
+        ablation = kwargs.get('ablation', 1000)        
         B = kwargs.get('batch_size', 32)
+        
+        train_test_binary = self.get_train_test_binary(**kwargs)
+        
+        
         x_train, y_train, x_val, y_val, x_test, y_test = train_test_binary
         train_data = tf.data.Dataset.from_tensor_slices((x_train, y_train))
-        train_data = train_data.shuffle(buffer_size=y_train.shape[0]).batch(B, drop_remainder=True)
+        train_data = train_data.shuffle(buffer_size=len(y_train)).batch(B, drop_remainder=True)
         
         val_data = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-        val_data = val_data.shuffle(buffer_size=y_val.shape[0]).batch(B, drop_remainder=True)
+        val_data = val_data.shuffle(buffer_size=len(y_val)).batch(B, drop_remainder=True)
         
         test_data = tf.data.Dataset.from_tensor_slices((x_test, y_test))
-        test_data = test_data.shuffle(buffer_size=y_test.shape[0]).batch(B, drop_remainder=True)
+        test_data = test_data.shuffle(buffer_size=len(y_test)).batch(B, drop_remainder=True)
         
         if self.debug: 
             # if self.debug: print(self.padded_num_seq_df.label.value_counts())
@@ -444,7 +470,7 @@ class HDFSLogv3:
             print('val_data', val_data)
             print('test_data', test_data)
             print('char in lines, train_data.element_spec[0].shape[2]',train_data.element_spec[0].shape[2])
-            print('num classes, train_data.element_spec[1].shape[1]: ',train_data.element_spec[1].shape[1])            
+            print('num classes, train_data.element_spec[1].shape: ',train_data.element_spec[1].shape)            
             print('length of val_data:',len(val_data))
         print('length of train_data - (num_seq_per_cls * num_class)// batch size:', len(train_data))
         tensor_train_val_test = train_data, val_data, test_data
@@ -453,12 +479,18 @@ class HDFSLogv3:
     
     def save_hdfs_log_obj(self, **kwargs):
         full_file_name = None
-        hdfs_obj_save = kwargs.get('hdfs_obj_save', False)
+        hdfs_obj_save = kwargs.get('hdfs_obj_save', True)
+        hdfs_rm_time_stamp = kwargs.get('hdfs_rm_time_stamp', self.hdfs_rm_time_stamp)
+        self.hdfs_rm_time_stamp = hdfs_rm_time_stamp ### for easy access to the calss attribute in the saved object
+        hdfs_rm_ip_address = kwargs.get('hdfs_rm_ip_address', self.hdfs_rm_ip_address)
+        self.hdfs_rm_ip_address = hdfs_rm_ip_address ### for easy access to the calss attribute in the saved object
+        hdfs_obj_save_path = kwargs.get('hdfs_obj_save_path', self.hdfs_obj_save_path)
+        self.hdfs_obj_save_path = hdfs_obj_save_path ### for easy access to the calss attribute in the saved object
         if hdfs_obj_save:
             hdfsdf = self.lebeled_num_seq_df_epn
-            if self.lebeled_num_seq_df_epn is None: 
+            if hdfsdf is None: 
                 hdfsdf = self.lebeled_num_seq_df_epn(**kwargs)
-                hdfs_obj_path = kwargs.get('hdfs_obj_path', 'data')
+                
             if not self.hdfs_rm_time_stamp and not self.hdfs_rm_ip_address:
                 meta_status = 'time_ip'
             elif not self.hdfs_rm_time_stamp and self.hdfs_rm_ip_address:
@@ -467,12 +499,12 @@ class HDFSLogv3:
                 meta_status = 'ip'
             else:
                 meta_status = 'no_meta'            
-            default_file_name = 'hdfsobj_' + self.padded_seq_len + '_' + self.padded_char_len + meta_status + '.pkl' 
+            default_file_name = 'hdfsobj_' + str(self.padded_seq_len) + '_' + str(self.padded_char_len) +'_' + meta_status + '.pkl' 
             hdfs_obj_name = kwargs.get('hdfs_obj_name', default_file_name)
 
-            if not os.path.exists(hdfs_obj_path):
-                os.mkdir(hdfs_obj_path)
-            full_file_name = os.path.join(hdfs_obj_path, hdfs_obj_name)
+            if not os.path.exists(hdfs_obj_save_path):
+                os.mkdir(hdfs_obj_save_path)
+            full_file_name = os.path.join(hdfs_obj_save_path, hdfs_obj_name)
             self.hdfs_saved_obj_name = full_file_name
             with open(full_file_name, 'wb') as f:
                 pickle.dump(self, f)

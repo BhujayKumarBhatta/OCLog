@@ -505,6 +505,7 @@ class HDFSLogv3:
             if not os.path.exists(hdfs_obj_save_path):
                 os.mkdir(hdfs_obj_save_path)
             full_file_name = os.path.join(hdfs_obj_save_path, hdfs_obj_name)
+            full_file_name = os.path.abspath(full_file_name)
             self.hdfs_saved_obj_name = full_file_name
             with open(full_file_name, 'wb') as f:
                 pickle.dump(self, f)

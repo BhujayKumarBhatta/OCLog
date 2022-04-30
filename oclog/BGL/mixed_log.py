@@ -292,7 +292,7 @@ class MixedLog:
     ######################## MIX LOG #########################
     ################################################
        
-    def get_bgl_df(self, **kwargs):
+    def get_hdfs_df(self, **kwargs):
         # load according to the seq, char and meta setting  or generate
         # data\\hdfsobj_32_176_time_ip.pkl
         #### HDFS param and BGL param matches
@@ -340,9 +340,12 @@ class MixedLog:
         bgl_df = self.padded_num_seq_df
         if bgl_df is None:
             bgl_df = self.get_padded_num_seq_df()
-        hdfs_df = self.get_bgl_df(**kwargs)
+        selected_labels = (bgl_df.label == 'INFO') | (bgl_df.label == 'FATAL') | (bgl_df.label == 'ERROR')
+        bgl_df = bgl_df[selected_labels]
+        bgl_df["label"].replace({"INFO": "0", "FATAL": "3", "ERROR": "4"}, inplace=True)
+        hdfs_df = self.get_hdfs_df(**kwargs)
         #############################################################
-        #hdfs_df["label"].replace({"hdfs_normal": "7", "hdfs_anomaly": "8"}, inplace=True)
+        hdfs_df["label"].replace({"hdfs_normal": "1", "hdfs_anomaly": "2"}, inplace=True)
         #########################################################
         mixed_df = pd.concat([bgl_df, hdfs_df])
         if self.debug: print(mixed_df.label.value_counts())
@@ -383,14 +386,14 @@ class MixedLog:
         # if self.debug: print('cls_unique_label', cls_unique_label)
         #######################################################
         if str(self.designated_ukc_cls) == str(label):
-            print(f'designated_ukc_cls: {designated_ukc_cls} matched with current label: {label}')
+            if self.debug: print(f'designated_ukc_cls: {designated_ukc_cls} matched with current label: {label}')
             if cls_data_cnt < test_cnt:
                 ukc_data = cls_data[0:cls_data_cnt]
             else:
                 ukc_data = cls_data[0:test_cnt]
             print(f'class {label} is added as ukc as per parameter designated_ukc_cls')
         else:
-            print(f'designated_ukc_cls: {designated_ukc_cls} not matched with current label: {label}')
+            if self.debug: print(f'designated_ukc_cls: {designated_ukc_cls} not matched with current label: {label}')
             if self.ablation <= cls_data_cnt: ### if 1000 <= 2000            
                 train_data = cls_data[0:train_cnt] ### cls_data[0:700]
                 val_data = cls_data[train_cnt:train_cnt+val_cnt] ### cls_data[700:(700+200)]
@@ -448,10 +451,10 @@ class MixedLog:
             print('total data in  temp ukc bucket:', ukc_num)
             if ukc_num >= self.ukc_cnt:
                 ukc_to_add = self.ukc_df[0:self.ukc_cnt]
-                print('slicing ukc bucket as per ukc_cnt parameter value:', self.ukc_cnt)
+                if self.debug: print('slicing ukc bucket as per ukc_cnt parameter value:', self.ukc_cnt)
             else:
                 ukc_to_add = self.ukc_df[0:ukc_num]
-                print(f'since the ukc_cnt value: {self.ukc_cnt} is less than the temporary bucket: {ukc_num}, adding all to ukc data')
+                if self.debug: print(f'since the ukc_cnt value: {self.ukc_cnt} is less than the temporary bucket: {ukc_num}, adding all to ukc data')
             self.test_df = pd.concat([self.test_df, ukc_to_add])
         if self.debug: 
             print('train classes:\n', self.train_df.label.value_counts())
@@ -487,10 +490,15 @@ class MixedLog:
         # print(y_val[:2])
         x_test = list(self.test_df.seq.values)     
         y_test = list(self.test_df.label.values)
-        if self.debug: print(f'labels in y_test: {np.unique(y_test)}, {len(np.unique(y_test))} \n')
+        print('###############################################################################')
+        print('############### Important for setting ukc_label parameter during openset training##############')
+        print('#### Unique label which is not present in train and val is the ukc ########')
+        print(f'labels in y_test: {np.unique(y_test)}, {len(np.unique(y_test))}')
         lbl_encoded_cls_test = le.fit_transform(y_test)
         unique_label_test_original = np.unique(lbl_encoded_cls_test)
         print('lbl_encoded_cls_test:', unique_label_test_original)
+        print('############### Note the test label and indexes for ukc_label parameter during openset training##############')
+        print('###############################################################################')
         #################### identifying the ukc lalbel number which is not present in the train_data set   ###########################
         max_label_num_train = max(lbl_encoded_cls_train)
         ukc_label = str(int(max_label_num_train)+1)
@@ -500,11 +508,13 @@ class MixedLog:
         ### otherwise the assignment is not required since anyway the number will be 1+ than the training
         ############################################
         ### assigning the  ukc label to the unknown dataset
-        if self.label_ukc_as and str(self.label_ukc_as) != str(ukc_label):            
+        if self.label_ukc_as and str(self.label_ukc_as) != str(ukc_label): 
+            ### this is wrong since label for test df has not been updated to number yet
             self.test_df.loc[self.test_df.label > max_label_num_train, 'label' ]=self.label_ukc_as
             y_test = list(self.test_df.label.values)
-            if self.debug: print(f'labels in y_test inside get_train_test_categorical: {np.unique(y_test)}, {len(np.unique(y_test))} ')
+            print(f'labels in y_test: {np.unique(y_test)}, {len(np.unique(y_test))} ')
             lbl_encoded_cls_test = le.fit_transform(y_test)
+            print('test cls:' , list(le.classes_))
             unique_label_test_modified = np.unique(lbl_encoded_cls_test)
             print('lbl_encoded_cls_test:', unique_label_test_modified)
         y_test = to_categorical(lbl_encoded_cls_test)

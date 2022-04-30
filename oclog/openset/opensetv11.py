@@ -61,7 +61,7 @@ class OpenSet:
         self.data_dir = 'data'
         self.ptmodel_path = None
         self.num_classes = None
-        self.ukc_label = kwargs.get('ukc_label', 2)
+        self.ukc_label = kwargs.get('ukc_label', 7)
         self.tf_random_seed = 1234  
         self.tracker = {}
     

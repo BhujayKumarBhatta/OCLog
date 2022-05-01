@@ -40,7 +40,7 @@ class OpenSet:
     TODO: update tracker with pttime and octime and notebook name
     TODO: excel cols to be reorganized
     '''
-    def __init__(self, function_model=False, **kwargs):
+    def __init__(self, function_model=False):
         self.ptmodel = None
         self.centroids = None       
         self.radius = None      
@@ -61,7 +61,6 @@ class OpenSet:
         self.data_dir = 'data'
         self.ptmodel_path = None
         self.num_classes = None
-        self.ukc_label = kwargs.get('ukc_label', 2)
         self.tf_random_seed = 1234  
         self.tracker = {}
     
@@ -110,8 +109,7 @@ class OpenSet:
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
         num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
         log_obj = kwargs.get('bglog', BGLog)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
-        print(f'Check if I am assigning ukc_label: {ukc_label} correctly, this should match with the ukc_label for the test dataset')
+        ukc_label = kwargs.get('ukc_label', 7)
         update_tracker = kwargs.get('update_tracker', True)
         save_ocmodel = kwargs.get('save_ocmodel', True)
         
@@ -145,10 +143,10 @@ class OpenSet:
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
             ######don't store the feature with this evaluate instead use the feature extracted during centroid and feature extraction before for loop
-            _, _, eval_score_train, _ = self.evaluate(train_data, ukc_label=ukc_label, debug=False,)
+            _, _, eval_score_train, _ = self.evaluate(train_data, debug=False,)
             self.f1_tr_lst.append(round(eval_score_train, 4))
             if val_data:
-                _, _, eval_score_val, _ = self.evaluate(val_data, ukc_label=ukc_label, debug=False)
+                _, _, eval_score_val, _ = self.evaluate(val_data, debug=False)
                 self.f1_val_lst.append(round(eval_score_val, 4))
                 print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
@@ -257,7 +255,7 @@ class OpenSet:
 
     def openpredict(self, features, **kwargs):
         debug = kwargs.get('debug', True)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
+        ukc_label = kwargs.get('ukc_label', 7)
         # print('self.centroid within openpredict ', self.centroids)
         logits = self.euclidean_metric(features, self.centroids)
         ####original line in pytorch ###probs, preds = F.softmax(logits.detach(), dim = 1).max(dim = 1)
@@ -287,7 +285,7 @@ class OpenSet:
         # if hasattr(data, ukc_label)
         debug = kwargs.get('debug', True)
         zero_div = kwargs.get('zero_div', 1)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
+        ukc_label = kwargs.get('ukc_label', 7)
         store_features = kwargs.get('store_features', False)
         
         # if ukc_label is None:

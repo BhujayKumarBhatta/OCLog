@@ -40,7 +40,7 @@ class OpenSet:
     TODO: update tracker with pttime and octime and notebook name
     TODO: excel cols to be reorganized
     '''
-    def __init__(self, function_model=False, **kwargs):
+    def __init__(self, function_model=False, ):
         self.ptmodel = None
         self.centroids = None       
         self.radius = None      
@@ -55,15 +55,14 @@ class OpenSet:
         self.total_labels = []
         self.epoch = 0
         self.best_train_score = 0
-        self.best_val_score = 0
-        self.num_classes = None
+        self.best_val_score = 0        
         self.ptmodel_name = 'ptmodel'
         self.data_dir = 'data'
         self.ptmodel_path = None
-        self.num_classes = None
-        self.ukc_label = kwargs.get('ukc_label', 7)
+        self.num_classes = None       
         self.tf_random_seed = 1234  
         self.tracker = {}
+        self.ukc_label = 9
     
     
     def extract_features_and_centroids(self, **kwargs):
@@ -108,15 +107,20 @@ class OpenSet:
         oc_epochs = kwargs.get('oc_epochs', 5)
         oc_wait = kwargs.get('oc_wait', 3)
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
-        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
+        ### This was self.num_labels in V6. For 5000 ablation 2 was provided manually  with init of openset 
+        ### hence it is the number of class in training data .
+        ### used in : # Boundary Loss , Centroids_cal  
+       
         log_obj = kwargs.get('bglog', BGLog)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
-        print(f'Check if I am assigning ukc_label: {ukc_label} correctly, this should match with the ukc_label for the test dataset')
+        # ukc_label = kwargs.get('ukc_label', self.ukc_label)   #### ukc_label = self.self.designated_ukc_cls
+        self.designated_ukc_cls = kwargs.get('designated_ukc_cls', log_obj.designated_ukc_cls)
+        self.ukc_label = kwargs.get('ukc_label', self.designated_ukc_cls) 
         update_tracker = kwargs.get('update_tracker', True)
         save_ocmodel = kwargs.get('save_ocmodel', True)
         
         oc_optimizer_obj = self.get_optimizer(oc_optimizer, lr_rate=oc_lr)
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
+        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
         self.num_classes = num_classes
         lossfunction = BoundaryLoss(num_labels=num_classes)
         ### ### why is it needed ? #####################
@@ -145,10 +149,10 @@ class OpenSet:
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
             ######don't store the feature with this evaluate instead use the feature extracted during centroid and feature extraction before for loop
-            _, _, eval_score_train, _ = self.evaluate(train_data, ukc_label=ukc_label, debug=False,)
+            _, _, eval_score_train, _ = self.evaluate(train_data, debug=False,)
             self.f1_tr_lst.append(round(eval_score_train, 4))
             if val_data:
-                _, _, eval_score_val, _ = self.evaluate(val_data, ukc_label=ukc_label, debug=False)
+                _, _, eval_score_val, _ = self.evaluate(val_data, debug=False)
                 self.f1_val_lst.append(round(eval_score_val, 4))
                 print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
@@ -177,13 +181,13 @@ class OpenSet:
         oc_tr_time = time.time() - start_time
         
         # kwargs.update({})
-        self.plot_radius_chages(num_classes=num_classes, **kwargs)        
+        self.plot_radius_chages(num_classes=self.num_classes, **kwargs)        
         print('classification report for training:')
-        _, _, f1_weighted, f_measure = self.evaluate(train_data, ukc_label=ukc_label)
+        _, _, f1_weighted, f_measure = self.evaluate(train_data, ukc_label=self.designated_ukc_cls)
         #### expecting to store the feature of test data and test labels with open set classes 
         print('classification report for test data:')
         ##### hence store_features is true and plotting the centroid with the test features and test labels
-        _, _, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=ukc_label, store_features=True)
+        _, _, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=self.designated_ukc_cls, store_features=True)
         centroid_plot_start = time.time()
         self.plot_centroids(use_labels=self.total_preds, **kwargs)
         centroid_plot_time = time.time() - centroid_plot_start
@@ -221,10 +225,12 @@ class OpenSet:
     
         
     def centroids_cal(self, data, **kwargs):
-        num_classes = kwargs.get('num_classes', data.element_spec[1].shape[1]) 
+        ''' centroid rows and total_label rows should not varry with training and testing dataset. It should be always number of classes 
+            of training dataset. self.num_classes should be used since this was captured while calling method train '''
+        # num_classes = kwargs.get('num_classes', data.element_spec[1].shape[1]) 
         embedding_size = kwargs.get('embedding_size', 16)        
-        centroids = tf.zeros((num_classes, embedding_size))
-        total_labels = tf.zeros(num_classes)
+        centroids = tf.zeros((self.num_classes, embedding_size))
+        total_labels = tf.zeros(self.num_classes)
         for batch in data:
             logseq_batch, label_batch = batch
             ## (32, 32, 64), (32, 4)            
@@ -249,7 +255,7 @@ class OpenSet:
         ### shape of centroids is (4, 16) whereas shape of total_labels is (1, 4)
         ### reshape the total_labels as 4,1 ==> [[0], [0], [0], [0]]==> 4 rows 
         ## so that we can divide the centroids array by the total_labels
-        total_label_reshaped = tf.reshape(total_labels, (num_classes, 1))
+        total_label_reshaped = tf.reshape(total_labels, (self.num_classes, 1))
         centroids /= total_label_reshaped
         # TODO: the centroid for a class is a scalar or vector ?
         return centroids 
@@ -257,7 +263,7 @@ class OpenSet:
 
     def openpredict(self, features, **kwargs):
         debug = kwargs.get('debug', True)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
+        # ukc_label = kwargs.get('ukc_label', 7)
         # print('self.centroid within openpredict ', self.centroids)
         logits = self.euclidean_metric(features, self.centroids)
         ####original line in pytorch ###probs, preds = F.softmax(logits.detach(), dim = 1).max(dim = 1)
@@ -275,7 +281,7 @@ class OpenSet:
         #convert to numpy since tensor is immutable
         unknown_filter_np = unknown_filter.numpy()
         preds_np = preds.numpy()
-        preds_np[unknown_filter_np] = ukc_label  
+        preds_np[unknown_filter_np] = self.ukc_label  
         if debug:
             print('euc_dis:', euc_dis)
             print('pred_radius:', pred_radius)
@@ -287,7 +293,12 @@ class OpenSet:
         # if hasattr(data, ukc_label)
         debug = kwargs.get('debug', True)
         zero_div = kwargs.get('zero_div', 1)
-        ukc_label = kwargs.get('ukc_label', self.ukc_label)
+        ukc_label = kwargs.get('ukc_label')
+        ##### as per opensetV6 ################
+        if ukc_label is None:
+            ukc_label = self.ukc_label
+        else:
+            self.ukc_label = ukc_label
         store_features = kwargs.get('store_features', False)
         
         # if ukc_label is None:
@@ -370,15 +381,15 @@ class OpenSet:
         pt_metrics = kwargs.get('pt_metrics', ['accuracy', tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
         tf_random_seed = kwargs.get('tf_random_seed', 1234 )
         embedding_size = kwargs.get('embedding_size', 16)
-        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
+        # num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
         tf.random.set_seed(self.tf_random_seed)
         if bglog is None or train_data is None or val_data is None:
             train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
         line_encoder = LogLineEncoder(bglog, chars_in_line=chars_in_line, char_embedding_size=char_embedding_size,)
         log_seqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=embedding_size)
-        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=num_classes)
+        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=self.num_classes)
         ptmodel_arch.compile(optimizer=pt_optimizer, loss=pt_loss, metrics=pt_metrics)
-        self.tupdate({'char_embedding_size': char_embedding_size, 'pt_optimizer': pt_optimizer, 'num_classes': num_classes,
+        self.tupdate({'char_embedding_size': char_embedding_size, 'pt_optimizer': pt_optimizer, 'num_classes': self.num_classes,
                             'pt_loss': pt_loss}, **kwargs)
         return ptmodel_arch 
     
@@ -393,7 +404,7 @@ class OpenSet:
         save_ptmodel = kwargs.get('save_ptmodel', True)
         pt_wait = kwargs.get('pt_wait', 3)
         pt_epochs = kwargs.get('pt_epochs', 5)
-        
+        pt_early_stop = kwargs.get('pt_early_stop', False)
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
         print(datetime.datetime.now())
         print('starting to create {} automatically'.format(ptmodel_name))
@@ -416,10 +427,14 @@ class OpenSet:
 
         LR = ReduceLROnPlateau(monitor=monitor_metric, factor=0.5, patience=2, cooldown=1, verbose=1)
         earlystop = EarlyStopping(monitor=monitor_metric, min_delta=0, patience=pt_wait, verbose=1)
+        callbacks_list = [LR]
         if save_ptmodel:
-            callbacks_list = [checkpoint, LR, earlystop]
-        else:
-            callbacks_list = [ LR, earlystop] 
+            callbacks_list.append(checkpoint)
+        if pt_early_stop:
+            callbacks_list.append(earlystop)
+        #     callbacks_list = [checkpoint, LR, earlystop]
+        # else:
+        #     callbacks_list = [ LR, earlystop] 
         print('staring pre trining')
         hist = ptmodel.fit(train_data, validation_data=val_data, epochs=pt_epochs,
                           callbacks=callbacks_list,  )        
@@ -555,12 +570,12 @@ class OpenSet:
         # random_state = kwargs.get('random_state', 123)
         # tsne_lr = kwargs.get('tsne_lr', 80)
         radius_pic_size = kwargs.get('radius_pic_size', (20, 6))
-        num_classes = kwargs.get('num_classes')
+        # num_classes = kwargs.get('num_classes')
         
         narr = np.array([elem.numpy() for elem in self.radius_changes])
         tnsr = tf.convert_to_tensor(narr)        
         tpose = tf.transpose(tnsr)
-        radius = [tpose.numpy()[0][i] for i in range(num_classes)]
+        radius = [tpose.numpy()[0][i] for i in range(self.num_classes)]
         losses = [elem.numpy() for elem in self.losses]
         f1_tr = np.array(self.f1_tr_lst) * 100
         val_tr = np.array(self.f1_val_lst) * 100        
@@ -648,6 +663,7 @@ class OpenSet:
         if centroid_class_color:
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black is False:
+            print('the color map for the classes, here index postion are the class number:', list(fixed_color_maps))
             ccolor = np.array([i for i in  range(len(centroids))])
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black:            

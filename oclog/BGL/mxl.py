@@ -500,14 +500,6 @@ class MixedLog:
         self.train_test_categorical = x_train, y_train, x_val, y_val, x_test, y_test
         return self.train_test_categorical
         
-        # if self.debug:
-        #     # print('test df', self.test_df.label.value_counts())
-        #     print('some example of labels:')
-        #     print('first two label in train:\n', y_train[:2])
-        #     print('first two label in tests:\n', y_test[:2])
-        #     print('80th and 82nd train label:\n', y_train[80:82])
-        # self.train_test_categorical = x_train, y_train, x_val, y_val, x_test, y_test
-        # return self.train_test_categorical
     
     
     def get_tensor_train_val_test(self, **kwargs):

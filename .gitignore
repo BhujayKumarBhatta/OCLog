@@ -9,3 +9,7 @@ oclog/openset/notebooks/data
 oclog\openset\notebooks\data
 oclog\BGL\data
 oclog/BGL/data
+*.pyc
+__pycahce__/*.pyc
+__pycache__\*.pyc
+

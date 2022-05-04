@@ -633,6 +633,11 @@ class OpenSet:
         centroid_black = kwargs.get('centroid_black', False)
         fixed_color_maps = np.array(["green","blue","yellow","pink","black","orange","purple",
                                      "red","beige","brown","gray","cyan","magenta"])
+        filtered_fixed_color_map = list(fixed_color_maps)
+        filtered_fixed_color_map = filtered_fixed_color_map[:self.num_classes]
+        # last_index = len(filtered_fixed_color_map) - 1
+        filtered_fixed_color_map.append('red')
+        filtered_fixed_color_map = np.array(filtered_fixed_color_map)
         
         features = np.array(total_features)
         centroids = self.centroids.numpy()
@@ -650,7 +655,8 @@ class OpenSet:
         scaled_cout = s_scalar.fit_transform(cout)
         
         ax5 = plt.subplot(row, col, fig) # # 1 row 2 column , 2nd plot
-        if manual_color_map:
+        if manual_color_map:            
+            print('the color map for the classes, here index postion are the class number:', filtered_fixed_color_map )
             fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=fixed_color_maps[labels], s=20, cmap='tab10',)
         else:
             fig5 = ax5.scatter(scaled_tout[:, 0], scaled_tout[:, -1], c=labels, s=feature_pic_size, cmap='tab10', )

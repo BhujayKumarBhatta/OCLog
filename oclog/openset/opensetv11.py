@@ -632,11 +632,11 @@ class OpenSet:
         manual_color_map = kwargs.get('manual_color_map', False)
         centroid_black = kwargs.get('centroid_black', False)
         fixed_color_maps = np.array(["green","blue","yellow","pink","black","orange","purple",
-                                     "red","beige","brown","gray","cyan","magenta"])
+                                     "beige","brown","gray","cyan","magenta", "red",])
         filtered_fixed_color_map = list(fixed_color_maps)
         filtered_fixed_color_map = filtered_fixed_color_map[:self.num_classes]
         # last_index = len(filtered_fixed_color_map) - 1
-        filtered_fixed_color_map.append('red')
+        filtered_fixed_color_map.append("red")
         filtered_fixed_color_map = np.array(filtered_fixed_color_map)
         
         features = np.array(total_features)
@@ -669,10 +669,10 @@ class OpenSet:
         if centroid_class_color:
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=centroid_pic_size, c=ccolor, cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black is False:
-            filtered_fixed_color_map = list(fixed_color_maps)
-            filtered_fixed_color_map = filtered_fixed_color_map[:self.num_classes]
-            last_index = len(filtered_fixed_color_map) - 1
-            filtered_fixed_color_map[last_index] = 'red'
+            # filtered_fixed_color_map = list(fixed_color_maps)
+            # filtered_fixed_color_map = filtered_fixed_color_map[:self.num_classes]
+            # last_index = len(filtered_fixed_color_map) - 1
+            # filtered_fixed_color_map[last_index] = 'red'
             print('the color map for the classes, here index postion are the class number:', filtered_fixed_color_map )
             ccolor = np.array([i for i in  range(len(centroids))])
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')

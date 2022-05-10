@@ -162,7 +162,7 @@ class LogClassifier(tf.keras.Model):
                 # loss = self.custom_loss(y, y_pred)
                 # print('self.batch_features', self.batch_features)
                 # print('y_pred', y_pred)
-                loss = self.hvm_loss(self.batch_features, embedding_size,  y, y_pred)
+                # loss = self.hvm_loss(self.batch_features, embedding_size,  y, y_pred)
 
         # Compute gradients
         trainable_vars = self.trainable_variables

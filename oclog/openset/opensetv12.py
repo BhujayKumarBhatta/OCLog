@@ -417,59 +417,94 @@ class OpenSet:
         pt_early_stop = kwargs.get('pt_early_stop', False)
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
         optimizer = tf.keras.optimizers.Adam()
+        pt_losses = []
         for epoch in range(pt_epochs):
             step_loss = 0
             for step, (logseq_batch, label_batch) in enumerate(train_data):
                 with tf.GradientTape() as tape:
-                    label_batch_pred = ptmodel(logseq_batch)
+                    label_batch_pred = ptmodel(logseq_batch, training=True)
                     batch_features = ptmodel(logseq_batch, extract_feature=True)
-                    batch_loss = self.hvm_loss(batch_features, embedding_size, label_batch, label_batch_pred)
+                    batch_loss = self.hvm_loss(batch_features, label_batch, label_batch_pred, **kwargs)
                     step_loss += batch_loss
-            gradients = tape.gradient(batch_loss, ptmodel.trainable_weights)
-            optimizer.apply_gradients(zip(gradients, ptmodel.trainable_weights))
-            print(f'loss: {step_loss/step}')
+            gradients = tape.gradient(batch_loss, ptmodel.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, ptmodel.trainable_variables))
+            batch_avg_loss = step_loss/step
+            pt_losses.append(batch_avg_loss)
+            pt_f1_tr, pt_f1_val = self.pt_evlaluate_epoch(loss=batch_avg_loss, eval_for='pt', ptmodel=ptmodel,
+                                                          epoch=epoch, epochs=pt_epochs, **kwargs)
+            # print(f'loss: {batch_avg_loss}')
+            
+            
+    def pt_evlaluate_epoch(self, loss=0, eval_for='pt', ptmodel=None, epoch=1, epochs=1, **kwargs):
+        train_data = kwargs.get('train_data')
+        val_data = kwargs.get('val_data')
+        pt_f1_tr, pt_f1_val = [], []
+        eval_score_train, train_acc = self.pt_evaluate(train_data,  ptmodel=ptmodel, debug=False,)
+        pt_f1_tr.append(round(eval_score_train, 4))
+        if eval_for == 'pt':
+            loss = loss
+        else:
+            loss = loss.numpy()
+        if val_data:
+            eval_score_val, val_acc= self.pt_evaluate(val_data,  ptmodel=ptmodel, debug=False)
+            pt_f1_val.append(round(eval_score_val, 4))
+            print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train} '
+                  f'train_loss: {loss}, val_acc: {val_acc},, F1_val: {eval_score_val}')
+        else:
+            print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train}')        
+        return pt_f1_tr, pt_f1_val
+    
+    
+    def pt_evaluate(self, data, ptmodel=None, **kwargs):
+        total_features, total_preds, total_labels, num_samples = [], [], [], 0
+        for batch in data:
+            logseq_batch, label_batch = batch
+            preds_np = ptmodel(logseq_batch)
+            preds_np = tf.math.argmax(preds_np, axis=1)
+            preds_np = preds_np.numpy()
+            total_preds.append(preds_np)
+            # print('total_preds', total_preds)
+            label_indexs = tf.math.argmax(label_batch, axis=1)
+            label_index_np = label_indexs.numpy()
+            total_labels.append(label_index_np)
+            # print('total_labels', total_labels)
+            # break
+            
+            num_samples += 1
+        y_pred = np.array(total_preds).flatten().tolist()        
+        y_true = np.array(total_labels).flatten().tolist()
+        acc = round(accuracy_score(y_true, y_pred) * 100, 2)
+        f1_weighted = f1_score(y_true, y_pred, average="weighted")
+        return  f1_weighted, acc
         
     
-    def hvm_loss(self, batch_features, embedding_size, label_batch, label_batch_pred):
-        # print('using hvm_loss .........................')  
-        # print('batch_feature within hvm loss', batch_features)
-        # print('label_batch within hvm loss', label_batch)
+    def hvm_loss(self, batch_features, label_batch, label_batch_pred, **kwargs): 
+        halpha = kwargs.get('halpha', 0.01)
+        hbeta = kwargs.get('hbeta', 1)
+        hepsilon = kwargs.get('hepsilon', .000004)
+        embedding_size = kwargs.get('embedding_size', 16)
         centroids = tf.zeros((self.num_classes, embedding_size))
         total_labels = tf.zeros(self.num_classes)
         for i in range(label_batch.shape[0]): # (32, 4) --> here length is 32
-            label = label_batch[i] # label looks like [0 0 0 1]
-            # print('label', label.numpy())
+            label = label_batch[i] # label looks like [0 0 0 1]           
             numeric_label = tf.math.argmax(label) # index position of the label = 3 , so it is actually class =3
-            numeric_label = numeric_label.numpy()
-            # print('numeric_label', numeric_label)
-            # numeric_label = np.array(tf.unstack(numeric_label))
-            ##total_labels = [0 0 0 0] each col representing a class 
-            ## count the number for each class
+            numeric_label = numeric_label.numpy()           
             total_labels_lst = tf.unstack(total_labels)
             total_labels_lst[numeric_label] += 1 
             total_labels = tf.stack(total_labels_lst)
             centroids_lst = tf.unstack(centroids)
             centroids_lst[numeric_label] += batch_features[i]
-            centroids = tf.stack(centroids_lst)
-            # self.labelled_features[numeric_label] = features[i]
-            # each row index in the centroid array is a class
-            # we add first identify the feature belonging to which class by the numeric_label
-            # Then add all the features belonging to the class in the corresponding row of the centroid arr
-        ### shape of centroids is (4, 16) whereas shape of total_labels is (1, 4)
-        ### reshape the total_labels as 4,1 ==> [[0], [0], [0], [0]]==> 4 rows 
-        ## so that we can divide the centroids array by the total_labels
+            centroids = tf.stack(centroids_lst)            
         total_label_reshaped = tf.reshape(total_labels, (self.num_classes, 1))
         centroids /= total_label_reshaped
         pt_batch_centroids = centroids
-        label_indexs = tf.math.argmax(label_batch, axis=1)
-        # c = tf.gather(centroids, indices=label_indexs)
-        centroid_for_features_as_per_class = tf.gather(centroids, indices=label_indexs)
-        # print('centroid_for_features_as_per_class', centroid_for_features_as_per_class.shape)
-        # print('first feature in batch_feature', batch_features[0], )
-        euc_dis = tf.norm(batch_features - centroid_for_features_as_per_class, ord='euclidean', axis=1)
-        # print('distance for the first feature', euc_dis[0], euc_dis.shape)
-        loss = tf.keras.losses.categorical_crossentropy(label_batch, label_batch_pred) + tf.reduce_mean(euc_dis, )
-        return loss
+        label_indexs = tf.math.argmax(label_batch, axis=1)        
+        centroid_for_features_as_per_class = tf.gather(centroids, indices=label_indexs)        
+        euc_dis = tf.norm(batch_features - centroid_for_features_as_per_class, ord='euclidean', axis=1)        
+        loss2 = hbeta * tf.reduce_mean(euc_dis, )        
+        loss1 = tf.keras.losses.categorical_crossentropy(label_batch, label_batch_pred)
+        loss1 = halpha * tf.reduce_mean(loss1) + hepsilon      
+        return  loss1 +  loss2 
         
         
     

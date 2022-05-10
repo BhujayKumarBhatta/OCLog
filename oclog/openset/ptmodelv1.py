@@ -76,7 +76,7 @@ class LogSeqEncoder(tf.keras.Model):
     
     def __init__(self, line_in_seq=32, num_of_conv1d=3,  filters=64,
                  kernel_size=3, maxpool_1=True,
-                 dense_neurons=16, dense_activation='relu',):
+                 dense_neurons=16, dense_activation='relu', batch_normalize=True):
         super().__init__()
         self.line_in_seq = line_in_seq
         self.num_of_conv1d = num_of_conv1d        
@@ -85,6 +85,7 @@ class LogSeqEncoder(tf.keras.Model):
         self.kernel_size = kernel_size
         self.maxpool_1 = maxpool_1
         self.dense_activation = dense_activation
+        self.batch_normalize = batch_normalize
         self.input_conv1d_layers = tf.keras.layers.Conv1D(filters=filters, 
                                                 kernel_size=kernel_size, 
                                                 padding='same')
@@ -96,6 +97,8 @@ class LogSeqEncoder(tf.keras.Model):
                        for _ in range(self.num_of_conv1d - 1)]
         self.maxpool1d = tf.keras.layers.MaxPooling1D(pool_size=(self.line_in_seq) ) #TODO done: make this varaible
         
+        
+        self.batch_norm = tf.keras.layers.BatchNormalization()
         self.Dense = tf.keras.layers.Dense(self.dense_neurons, 
                                            activation=self.dense_activation)
        
@@ -109,6 +112,8 @@ class LogSeqEncoder(tf.keras.Model):
         x = self.maxpool1d(x)
         tf_shape = tf.shape(inputs)
         x = tf.reshape(x, (tf_shape[0], self.filters)) 
+        if self.batch_normalize:
+            x = self.batch_norm(x)
         x = self.Dense(x)
         return x
     
@@ -116,9 +121,10 @@ class LogSeqEncoder(tf.keras.Model):
     
 class LogClassifier(tf.keras.Model):
     
-    def __init__(self,  num_classes, line_encoder, seq_encoder, **kwargs):
+    def __init__(self,  num_classes, line_encoder, seq_encoder, batch_normalize=True, **kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
+        self.batch_norm = tf.keras.layers.BatchNormalization()
         self.log_line_encoder = line_encoder
         self.log_seq_encoder = seq_encoder
         self.classifier = tf.keras.layers.Dense(
@@ -126,11 +132,14 @@ class LogClassifier(tf.keras.Model):
         # self.mymetrics = [tf.keras.metrics.Accuracy(), tf.keras.metrics.Precision(),tf.keras.metrics.Recall()] 
         # self.my_loss_tracker = tf.keras.metrics.Mean(name="my_loss")
         self.batch_features = None
+        self.batch_normalize = batch_normalize
         
    
     def call(self, inputs, extract_feature=False,):
         x = self.log_line_encoder(inputs)
-        seq_embedding = self.log_seq_encoder(x)
+        if self.batch_normalize:
+            x = self.batch_norm(x)
+        seq_embedding = self.log_seq_encoder(x)        
         self.batch_features = seq_embedding        
         if  extract_feature:
             output = seq_embedding

@@ -16,6 +16,7 @@ import pandas as pd
 import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
+from collections import namedtuple
 tf.random.set_seed(123)
 from oclog.BGL.bglv1 import BGLog
 from oclog.openset.boundary_loss import BoundaryLoss
@@ -55,7 +56,11 @@ class OpenSet:
         self.total_labels = []
         self.epoch = 0
         self.best_train_score = 0
-        self.best_val_score = 0        
+        self.best_val_score = 0 
+        self.pt_epochs = 0
+        self.best_pt_f1_tr = 0
+        self.best_pt_f1_val = 0
+        
         self.ptmodel_name = 'ptmodel'
         self.data_dir = 'data'
         self.ptmodel_path = None
@@ -63,6 +68,8 @@ class OpenSet:
         self.tf_random_seed = 1234  
         self.tracker = {}
         self.ukc_label = 9
+        
+        
     
     
     def extract_features_and_centroids(self, **kwargs):
@@ -401,6 +408,17 @@ class OpenSet:
     
     
     def ptmodel_custom_train(self, **kwargs):
+        '''
+        ###TODO: 
+        early stop
+        batch_normalize in model arch
+        integrate with oc train        
+        pt_lr 
+        save_model
+        call the keral metric instead of custom evaluation
+        '''
+        ################ setting the variables ##############################
+        start_time = time.time()
         bglog = kwargs.get('bglog')
         train_data = kwargs.get('train_data')
         val_data = kwargs.get('val_data')
@@ -415,44 +433,95 @@ class OpenSet:
         pt_wait = kwargs.get('pt_wait', 3)
         pt_epochs = kwargs.get('pt_epochs', 5)
         pt_early_stop = kwargs.get('pt_early_stop', False)
+        plot_ptmodel_centroid = kwargs.get('plot_ptmodel_centroid', True)
+        plot_ptmodel_scores = kwargs.get('plot_ptmodel_scores', True)
         train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
+        print(datetime.datetime.now())
+        print('starting to create {} automatically'.format(ptmodel_name))
+        curr_dt_time = datetime.datetime.now()
+        model_name = self.ptmodel_name + '_' + str(curr_dt_time).replace(' ','_').replace(':','_') + '/'
+        if not os.path.exists(self.save_dir):
+            os.mkdir(self.save_dir)
+        filepath = os.path.join(self.save_dir, model_name)                 
+        if val_data is not None:
+            monitor_metric = 'val_accuracy'
+        ################ initializing the optimizer###############
         optimizer = tf.keras.optimizers.Adam()
-        pt_losses = []
+        pt_losses, pt_F1_score_train, pt_F1_score_val = [], [], []
+        HIST = namedtuple("HIST", "history")  #### This will just act like hist.history object 
+        ###################################################################################
+        ###############EPOCH######################################
         for epoch in range(pt_epochs):
             step_loss = 0
+            #########################BATCH############################
             for step, (logseq_batch, label_batch) in enumerate(train_data):
                 with tf.GradientTape() as tape:
+                    ############pass the data and get feature at the same time #####################
                     label_batch_pred = ptmodel(logseq_batch, training=True)
-                    batch_features = ptmodel(logseq_batch, extract_feature=True)
+                    batch_features = ptmodel.batch_features # Avoiding second call batch_features = ptmodel(logseq_batch, extract_feature=True)
+                    #################### calling hypersphere volume minimization custom loss function #######################
                     batch_loss = self.hvm_loss(batch_features, label_batch, label_batch_pred, **kwargs)
                     step_loss += batch_loss
+            ########### calculate gradient  of the weights and biases with respect to batch_loss ####################
             gradients = tape.gradient(batch_loss, ptmodel.trainable_variables)
+            ########### apply gradient  on the weights and biases ####################
             optimizer.apply_gradients(zip(gradients, ptmodel.trainable_variables))
-            batch_avg_loss = step_loss/step
-            pt_losses.append(batch_avg_loss)
+            ########## since the weights have been changed it is expected that the average loss for the epochs 
+            batch_avg_loss = step_loss/step  #### total losses from all the batches in a epochs divided by the number of batches           
+            ############################## Evaluate and display scores############################           
             pt_f1_tr, pt_f1_val = self.pt_evlaluate_epoch(loss=batch_avg_loss, eval_for='pt', ptmodel=ptmodel,
                                                           epoch=epoch, epochs=pt_epochs, **kwargs)
+            if (pt_f1_tr > self.best_pt_f1_tr) or (pt_f1_val > self.best_pt_f1_val):
+                wait = 0
+                if pt_f1_tr > self.best_pt_f1_tr:                
+                    self.best_pt_f1_tr = pt_f1_tr
+                if val_data and pt_f1_val > self.best_pt_f1_val:
+                    self.best_pt_f1_val = pt_f1_val
+            else:    
+                wait += 1
+                if pt_f1_tr <= self.best_pt_f1_tr:
+                    print(f'train score not improving  going to wait state {wait}')
+                if pt_f1_val <= self.best_pt_f1_val:
+                    print(f'val score not improving  going to wait state {wait}')                
+                if wait >= pt_wait:                    
+                    break
+            self.pt_epochs = pt_epochs            
+            #########################################################################################            
+            pt_losses.append(batch_avg_loss.numpy())
+            pt_F1_score_train.append(pt_f1_tr)
+            pt_F1_score_val.append(pt_f1_val )       
+        history = {'training_loss': pt_losses, 'pt_F1_score_train': pt_F1_score_train, 
+                   'pt_F1_score_val': pt_F1_score_val}
+        hist = HIST(history)
+        pt_time = time.time() - start_time
+        self.tupdate({'ptmodel_name': ptmodel_name, 'data_dir': self.data_dir, 'save_ptmodel': save_ptmodel, 'pt_wait': pt_wait,
+                            'pt_epochs':pt_epochs,  'ptmodel_path': filepath,
+                     'pt_time': pt_time}, run_id_print=True, **kwargs)
+        if plot_ptmodel_scores:
+            self.plot_pretrain_result(hist)
+        self.ptmodel = ptmodel  ###### This will ensurefeatures can be now obtained from the trained model without further training 
+        if plot_ptmodel_centroid:
+            _, _ = self.extract_features_and_centroids(**kwargs)
             # print(f'loss: {batch_avg_loss}')
             
             
     def pt_evlaluate_epoch(self, loss=0, eval_for='pt', ptmodel=None, epoch=1, epochs=1, **kwargs):
         train_data = kwargs.get('train_data')
-        val_data = kwargs.get('val_data')
-        pt_f1_tr, pt_f1_val = [], []
+        val_data = kwargs.get('val_data')       
         eval_score_train, train_acc = self.pt_evaluate(train_data,  ptmodel=ptmodel, debug=False,)
-        pt_f1_tr.append(round(eval_score_train, 4))
+        eval_score_train  = round(eval_score_train, 4)        
         if eval_for == 'pt':
             loss = loss
         else:
             loss = loss.numpy()
         if val_data:
             eval_score_val, val_acc= self.pt_evaluate(val_data,  ptmodel=ptmodel, debug=False)
-            pt_f1_val.append(round(eval_score_val, 4))
+            eval_score_val  = round(eval_score_val, 4)            
             print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train} '
-                  f'train_loss: {loss}, val_acc: {val_acc},, F1_val: {eval_score_val}')
+                  f'val_loss: {loss}, val_acc: {val_acc},, F1_val: {eval_score_val}')
         else:
             print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train}')        
-        return pt_f1_tr, pt_f1_val
+        return eval_score_train, eval_score_val
     
     
     def pt_evaluate(self, data, ptmodel=None, **kwargs):
@@ -463,25 +532,21 @@ class OpenSet:
             preds_np = tf.math.argmax(preds_np, axis=1)
             preds_np = preds_np.numpy()
             total_preds.append(preds_np)
-            # print('total_preds', total_preds)
             label_indexs = tf.math.argmax(label_batch, axis=1)
             label_index_np = label_indexs.numpy()
-            total_labels.append(label_index_np)
-            # print('total_labels', total_labels)
-            # break
-            
+            total_labels.append(label_index_np)    
             num_samples += 1
         y_pred = np.array(total_preds).flatten().tolist()        
         y_true = np.array(total_labels).flatten().tolist()
         acc = round(accuracy_score(y_true, y_pred) * 100, 2)
-        f1_weighted = f1_score(y_true, y_pred, average="weighted")
+        f1_weighted = f1_score(y_true, y_pred, average="weighted")       
         return  f1_weighted, acc
         
     
     def hvm_loss(self, batch_features, label_batch, label_batch_pred, **kwargs): 
         halpha = kwargs.get('halpha', 0.01)
         hbeta = kwargs.get('hbeta', 1)
-        hepsilon = kwargs.get('hepsilon', .000004)
+        hepsilon = kwargs.get('hepsilon', 0.0000000000001)
         embedding_size = kwargs.get('embedding_size', 16)
         centroids = tf.zeros((self.num_classes, embedding_size))
         total_labels = tf.zeros(self.num_classes)
@@ -663,11 +728,15 @@ class OpenSet:
     def plot_pretrain_result(self, hist, **kwargs):
         figsize = kwargs.get('figsize',  (20, 6))
         pre_scores = hist.history
+        # print('pre_scores', pre_scores)
         pre_scores = {k:pre_scores[k] for k in pre_scores.keys() if 'loss' not in k }
-        pre_scores_df = pd.DataFrame(pre_scores)       
-        pre_losses = hist.history        
+        pre_scores_df = pd.DataFrame(pre_scores) 
+        # print('pre_scores_df', pre_scores_df)
+        pre_losses = hist.history   
+        # print('pre_losses', pre_losses)
         pre_losses = {k:pre_losses[k] for k in pre_losses.keys() if 'loss' in k }
         pre_losses_df = pd.DataFrame(pre_losses)   
+        # print('pre_losses_df', pre_losses_df)
         plt.figure(figsize=figsize)
         plt.subplot(1, 2, 1) ### 1 rows 2 column , first plot
         fig1 = sns.lineplot(data=pre_scores_df, )

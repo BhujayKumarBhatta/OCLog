@@ -409,13 +409,12 @@ class OpenSet:
     
     def ptmodel_custom_train(self, **kwargs):
         '''
-        ###TODO: 
-        early stop
+        ###TODO:         
         batch_normalize in model arch
         integrate with oc train        
         pt_lr 
         save_model
-        call the keral metric instead of custom evaluation
+        call the keras metric instead of custom evaluation
         '''
         ################ setting the variables ##############################
         start_time = time.time()

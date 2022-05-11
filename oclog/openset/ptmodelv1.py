@@ -113,6 +113,7 @@ class LogSeqEncoder(tf.keras.Model):
         tf_shape = tf.shape(inputs)
         x = tf.reshape(x, (tf_shape[0], self.filters)) 
         if self.batch_normalize:
+            # print('batch normalizing in Log Sequences')
             x = self.batch_norm(x)
         x = self.Dense(x)
         return x
@@ -139,6 +140,7 @@ class LogClassifier(tf.keras.Model):
         x = self.log_line_encoder(inputs)
         if self.batch_normalize:
             x = self.batch_norm(x)
+            # print('batch normalizing in Log Lines')
         seq_embedding = self.log_seq_encoder(x)        
         self.batch_features = seq_embedding        
         if  extract_feature:

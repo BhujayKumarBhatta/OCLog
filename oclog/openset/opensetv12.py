@@ -69,112 +69,139 @@ class OpenSet:
         self.tracker = {}
         self.ukc_label = 9
         
+        ############ pt_custom_train################
+        self.bglog = None
+        self.train_data = None
+        self.val_data = None
+        self.embedding_size = None
+        self.ptmodel = None
+        self.ptmodel_name = None
+        self.monitor_metric = None
+        self.save_ptmodel = None
+        self.pt_wait = None
+        self.pt_epochs = None
+        self.pt_early_stop = None
+        self.plot_ptmodel_centroid = None
+        self.plot_ptmodel_scores = None
+        self.ptmodel_vhm = False
+        self.ptmodel_get_mode = None
+        self.pt_epochs_end = 1
+        ######################
         
+        ########### get_pt_model_arch ###############
+        self.chars_in_line = None
+        self.line_in_seq = None
+        self.char_embedding_size = None
+        self.pt_optimizer = None
+        self.pt_loss = None
+        self.pt_metrics = None
+        self.tf_random_seed = None
+        # embedding_size = None
+        self.batch_normalize = None
+        
+        ######## OC Training #########
+        self.debug = None
+        self.oc_optimizer = None
+        self.oc_lr = None
+        self.oc_epochs = None
+        self.oc_wait = None
+        self.designated_ukc_cls = None
+        self.ukc_label = None       
+        self.save_ocmodel = None
+        self.oc_optimizer_obj = None
+        self.oc_centroid_plot = None
+        self.pc_centroid_plot = None
+        self.track_experiment = None
+        
+        
+    def _get_all_kwargs(self, **kwargs):
+        print('extracting all the values from your input parameter')
+        self.bglog = kwargs.get('bglog', self.bglog)
+        self.train_data = kwargs.get('train_data', self.train_data)        
+        self.val_data = kwargs.get('val_data', self.val_data)
+        if self.train_data:
+            self.num_classes = kwargs.get('num_classes', self.train_data.element_spec[1].shape[1])
+        self.embedding_size = kwargs.get('embedding_size', 16)
+        self.ptmodel_vhm = kwargs.get('ptmodel_vhm', True)
+        self.ptmodel_name = kwargs.get('ptmodel_name', 'ptmodel')
+        self.monitor_metric = kwargs.get('monitor_metric', 'accuracy')
+        self.data_dir = kwargs.get('data_dir', self.data_dir)
+        self.save_dir = kwargs.get('save_dir', self.data_dir)
+        self.save_ptmodel = kwargs.get('save_ptmodel', True)
+        self.pt_wait = kwargs.get('pt_wait', 3)
+        self.pt_epochs = kwargs.get('pt_epochs', 5)
+        self.pt_early_stop = kwargs.get('pt_early_stop', False)
+        self.plot_ptmodel_centroid = kwargs.get('plot_ptmodel_centroid', True)
+        self.plot_ptmodel_scores = kwargs.get('plot_ptmodel_scores', True)
+        self.ptmodel_get_mode =  kwargs.get('ptmodel_get_mode', 'train')
+        
+        ########### get_pt_model_arch ###############                 
+        self.pt_optimizer = kwargs.get('pt_optimizer', 'adam')
+        self.pt_loss = kwargs.get('pt_loss', 'categorical_crossentropy')
+        self.pt_metrics = kwargs.get('pt_metrics', ['accuracy', tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
+        self.tf_random_seed = kwargs.get('tf_random_seed', 1234 )
+        # embedding_size = kwargs.get('embedding_size', 16)
+        self.batch_normalize = kwargs.get('batch_normalize', True)
+        
+        ############### oc training #####################
+        self.debug = kwargs.get('debug', False)
+        self.oc_optimizer = kwargs.get('oc_optimizer')
+        self.oc_lr = kwargs.get('oc_lr', 2)
+        self.oc_epochs = kwargs.get('oc_epochs', 5)
+        self.oc_wait = kwargs.get('oc_wait', 3)
+        self.designated_ukc_cls = kwargs.get('designated_ukc_cls', self.designated_ukc_cls)
+        self.ukc_label = kwargs.get('ukc_label', self.designated_ukc_cls) 
+        self.track_experiment = kwargs.get('track_experiment', True)
+        self.save_ocmodel = kwargs.get('save_ocmodel', True)
+        self.oc_centroid_plot = kwargs.get('oc_centroid_plot', 'True')
+        self.pc_centroid_plot = kwargs.get('pc_centroid_plot', 'True')   
     
-    
-    def extract_features_and_centroids(self, **kwargs):
-        store_features = kwargs.get('store_features', True)
-        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
-        self.centroids = self.centroids_cal(train_data, **kwargs)        
-        feature_from = kwargs.get('store_features', 'train_data')        
-        if feature_from == 'val_data':
-            data = val_data
-        elif feature_from == 'test_data':
-            data = test_data
-        else:
-            data = train_data
-        total_features, total_preds, total_labels = [], [], []
-        for batch in data:
-            logseq_batch, label_batch = batch
-            features_batch = self.get_pretrained_features(logseq_batch, **kwargs)
-            label_indexs = tf.math.argmax(label_batch, axis=1)
-            label_index_np = label_indexs.numpy()
-            total_labels.append(label_index_np)
-            total_features.append(features_batch)
-        # y_pred = np.array(total_preds).flatten().tolist()
-        y_true = np.array(total_labels).flatten().tolist()
-        if store_features:
-            # self.total_preds = y_pred
-            self.total_labels = y_true
-            total_features = np.array(total_features)
-            total_features = np.reshape(total_features, ((total_features.shape[0] * total_features.shape[1]), total_features.shape[2])    ) 
-        self.total_features = total_features
-        self.plot_centroids(**kwargs)
-        self.tupdate({'feature_from': feature_from}, run_id_print=True,  **kwargs)
-        return total_features, total_labels
     
     
     def train(self, **kwargs):
-        ### ### calculate centroid  after each ephochs after a fresh training############ 
-        ###################################################################
-        start_time = time.time()
-        debug = kwargs.get('oc_optimizer', False)
-        oc_optimizer = kwargs.get('oc_optimizer')
-        oc_lr = kwargs.get('oc_lr', 2)
-        oc_epochs = kwargs.get('oc_epochs', 5)
-        oc_wait = kwargs.get('oc_wait', 3)
-        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
-        ### This was self.num_labels in V6. For 5000 ablation 2 was provided manually  with init of openset 
-        ### hence it is the number of class in training data .
-        ### used in : # Boundary Loss , Centroids_cal  
-       
-        log_obj = kwargs.get('bglog', BGLog)
-        # ukc_label = kwargs.get('ukc_label', self.ukc_label)   #### ukc_label = self.self.designated_ukc_cls
-        self.designated_ukc_cls = kwargs.get('designated_ukc_cls', log_obj.designated_ukc_cls)
-        self.ukc_label = kwargs.get('ukc_label', self.designated_ukc_cls) 
-        update_tracker = kwargs.get('update_tracker', True)
-        save_ocmodel = kwargs.get('save_ocmodel', True)
-        
-        oc_optimizer_obj = self.get_optimizer(oc_optimizer, lr_rate=oc_lr)
-        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
-        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
-        self.num_classes = num_classes
-        lossfunction = BoundaryLoss(num_labels=num_classes)
-        
-        oc_centroid_plot = kwargs.get('oc_centroid_plot', 'True')
-        pc_centroid_plot = kwargs.get('pc_centroid_plot', 'True')
-        # oc_train = kwargs.get('oc_train', 'True')
+        self._get_all_kwargs(**kwargs)       
+        start_time = time.time()        
+        self.get_or_generate_dataset(**kwargs)        
         ### ### why is it needed ? #####################
-        # self.radius = tf.nn.softplus(lossfunction.theta)
-        
-        ######### get centroids #############
-        # train_data=train_data, val_data=val_data, test_data=test_data, bglog=bglog,
-        _, _ = self.extract_features_and_centroids(**kwargs)
-        # self.centroids = self.centroids_cal(train_data, **kwargs) 
+        # self.radius = tf.nn.softplus(lossfunction.theta)        
+        ######### get centroids #############        
+        if self.ptmodel_vhm:
+            self.centroids = self.centroids_cal(self.train_data, **kwargs)
+        else:
+            print('extracting feature for ptmodel centroid plot')
+            _, _ = self.extract_features_and_centroids(**kwargs)         
         # if debug: print('self.centroids calcualted: ', self.centroids)
         ####################################################    
-        wait, best_radius, best_centroids = 0, None, None 
-        for epoch in range(oc_epochs):
-            ### ### calculate centroid after one more round of triaing
-            # this is increasing the loss instead of decreasing in each epoch
-            #self.pretrained_model.fit(data_train)
-            #self.centroids = self.centroids_cal(data_train)  
+        wait, best_radius, best_centroids = 0, None, None
+        lossfunction = BoundaryLoss(num_labels=self.num_classes)
+        self.oc_optimizer_obj = self.get_optimizer(self.oc_optimizer, lr_rate=self.oc_lr)   
+        for epoch in range(self.oc_epochs):            
             tr_loss, nb_tr_examples, nb_tr_steps = 0, 0, 0            
-            for batch in tqdm(train_data):
+            for batch in tqdm(self.train_data):
                 logseq_batch, label_batch = batch ## (32, 32, 64), (32, 4)
                 batch_loss, self.radius = self.train_step(lossfunction, 
-                                                     logseq_batch, label_batch, oc_optimizer_obj)
+                                                     logseq_batch, label_batch, self.oc_optimizer_obj)
                 tr_loss += batch_loss
                 nb_tr_steps += 1                
             self.radius_changes.append(self.radius)
             loss = tr_loss / nb_tr_steps
             self.losses.append(tr_loss)
             ######don't store the feature with this evaluate instead use the feature extracted during centroid and feature extraction before for loop
-            _, _, eval_score_train, _ = self.evaluate(train_data, debug=False,)
+            _, _, eval_score_train, _ = self.evaluate(self.train_data, debug=False,)
             self.f1_tr_lst.append(round(eval_score_train, 4))
-            if val_data:
-                _, _, eval_score_val, _ = self.evaluate(val_data, debug=False)
+            if self.val_data:
+                _, _, eval_score_val, _ = self.evaluate(self.val_data, debug=False)
                 self.f1_val_lst.append(round(eval_score_val, 4))
-                print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
+                print(f'epoch: {epoch+1}/{self.oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train} '
                       f'F1_val: {eval_score_val}')
             else:
-                print(f'epoch: {epoch+1}/{oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')            
+                print(f'epoch: {epoch+1}/{self.oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')            
             
             if (eval_score_train > self.best_train_score) or (eval_score_val > self.best_val_score):
                 wait = 0
                 if eval_score_train > self.best_train_score:                
                     self.best_train_score = eval_score_train
-                if val_data and eval_score_val > self.best_val_score:
+                if self.val_data and eval_score_val > self.best_val_score:
                     self.best_val_score = eval_score_val
                 best_radius = self.radius
                 # best_centroids = self.centroids                
@@ -184,34 +211,32 @@ class OpenSet:
                     print(f'train score not improving  going to wait state {wait}')
                 if eval_score_val <= self.best_val_score:
                     print(f'val score not improving  going to wait state {wait}')                
-                if wait >= oc_wait:                    
+                if wait >= self.oc_wait:                    
                     break
             self.epoch = epoch
         self.radius = best_radius
         # self.centroids = best_centroids 
-        oc_tr_time = time.time() - start_time
-        
+        oc_tr_time = time.time() - start_time        
         # kwargs.update({})
         self.plot_radius_chages(num_classes=self.num_classes, **kwargs)        
         print('classification report for training:')
-        _, _, f1_weighted, f_measure = self.evaluate(train_data, ukc_label=self.designated_ukc_cls)
+        _, _, f1_weighted, f_measure = self.evaluate(self.train_data, ukc_label=self.designated_ukc_cls)
         #### expecting to store the feature of test data and test labels with open set classes 
         print('classification report for test data:')
         ##### hence store_features is true and plotting the centroid with the test features and test labels
-        _, _, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=self.designated_ukc_cls, store_features=True)
+        _, _, f1_weighted, f_measure = self.evaluate(self.test_data, ukc_label=self.designated_ukc_cls, store_features=True)
         centroid_plot_start = time.time()
-        if oc_centroid_plot:
+        if self.oc_centroid_plot:
+            print('plotting feature map with UKC')
             self.plot_centroids(use_labels=self.total_preds, **kwargs)
         centroid_plot_time = time.time() - centroid_plot_start
         total_oc_time = time.time() - start_time
-        self.tracker.update({'oc_epochs': oc_epochs, 'oc_wait': oc_wait, 'oc_lr': oc_lr, 'oc_optimizer': oc_optimizer,
-        
+        self.tracker.update({'oc_epochs': self.oc_epochs, 'oc_wait': self.oc_wait, 'oc_lr': self.oc_lr, 'oc_optimizer': self.oc_optimizer,
                             'oc_tr_time': oc_tr_time, 'centroid_plot_start': centroid_plot_start,
                             'total_oc_time': total_oc_time}, **kwargs)
-        if update_tracker:
+        if self.track_experiment:
             self.update_tracker('mytest.xlsx', self.tracker)
-        self.save_oc_model(**kwargs)
-        
+        self.save_oc_model(**kwargs)        
         return self.losses, self.radius_changes  
     
             
@@ -223,17 +248,6 @@ class OpenSet:
             gradients = tape.gradient(loss, [self.radius])
             optimizer.apply_gradients(zip(gradients, [self.radius]))
         return loss, self.radius
-       
-        
-    def get_pretrained_features(self, logseq_batch, **kwargs):
-        if self.function_model is True:
-            penultimate_layer = self.pretrained_model.layers[len(self.pretrained_model.layers) -2]
-#             features = penultimate_layer.output
-        else:
-            ptmodel = self.get_ptmodel(**kwargs)
-            batch_features = ptmodel(logseq_batch, extract_feature=True)
-        self.batch_features = batch_features
-        return batch_features
     
         
     def centroids_cal(self, data, **kwargs):
@@ -355,17 +369,31 @@ class OpenSet:
             # self.plot_centroids()
         self.tupdate({'f1_micro': f1_micro, 'f1_weighted': f1_weighted, 'oc_accu': acc,
                             'ukc_label': ukc_label}, run_id_print=False, **kwargs)
-        return y_true, y_pred, f1_weighted, f_measure
+        return y_true, y_pred, f1_weighted, f_measure   
     
+    ########################################  PT MODEL ####################################################
+    
+    def get_pretrained_features(self, logseq_batch, **kwargs):
+        if self.function_model is True:
+            penultimate_layer = self.pretrained_model.layers[len(self.pretrained_model.layers) -2]
+#             features = penultimate_layer.output
+        else:
+            ptmodel = self.get_ptmodel(**kwargs)
+            batch_features = ptmodel(logseq_batch, extract_feature=True)
+        self.batch_features = batch_features
+        return batch_features
     
     def get_ptmodel(self, **kwargs):
-        self.ptmodel = kwargs.get('ptmodel', self.ptmodel)
-        ptmodel_get_mode =  kwargs.get('ptmodel_get_mode', 'train')
+        # self.get_all_kwargs(**kwargs)
+        # self.ptmodel = kwargs.get('ptmodel', self.ptmodel)        
         if self.ptmodel is None:
-            if ptmodel_get_mode == 'import':
+            if self.ptmodel_get_mode == 'import':
                 self.ptmodel = self.import_ptmodel(**kwargs)
-            else:
-                self.ptmodel, hist, filepath = self.train_ptmodel(**kwargs) #ptmodel, hist, filepath
+            else:                
+                if self.ptmodel_vhm:
+                    self.ptmodel_custom_train(**kwargs)
+                else:
+                    self.ptmodel, hist, filepath = self.train_ptmodel(**kwargs) #ptmodel, hist, filepath
         return self.ptmodel
     
     
@@ -381,68 +409,48 @@ class OpenSet:
         return self.ptmodel
     
     
-    def get_ptmodel_arch(self, **kwargs):
-        bglog = kwargs.get('bglog')
-        train_data = kwargs.get('train_data')
-        val_data = kwargs.get('val_data')
-        chars_in_line = kwargs.get('chars_in_line', train_data.element_spec[0].shape[2])
-        line_in_seq = kwargs.get('line_in_seq', train_data.element_spec[0].shape[1])
-        char_embedding_size = kwargs.get('char_embedding_size', len(bglog.tk.word_index)) # if None self.vocabulary_size will be used by the LogLineEncoder         
-        pt_optimizer = kwargs.get('pt_optimizer', 'adam')
-        pt_loss = kwargs.get('pt_loss', 'categorical_crossentropy')
-        pt_metrics = kwargs.get('pt_metrics', ['accuracy', tf.keras.metrics.Precision(),tf.keras.metrics.Recall()])
-        tf_random_seed = kwargs.get('tf_random_seed', 1234 )
-        embedding_size = kwargs.get('embedding_size', 16)
-        # num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
+    def _get_ptmodel_arch(self, **kwargs):
+        # self.get_all_kwargs(**kwargs)
+        self.chars_in_line = kwargs.get('chars_in_line', self.train_data.element_spec[0].shape[2])
+        self.line_in_seq = kwargs.get('line_in_seq', self.train_data.element_spec[0].shape[1])
+        self.char_embedding_size = kwargs.get('char_embedding_size', len(self.bglog.tk.word_index)) # if None self.vocabulary_size will be used by the LogLineEncoder
         tf.random.set_seed(self.tf_random_seed)
-        if bglog is None or train_data is None or val_data is None:
-            train_data, val_data,  test_data, bglog = self.get_bgdata(**kwargs)
-        line_encoder = LogLineEncoder(bglog, chars_in_line=chars_in_line, char_embedding_size=char_embedding_size,)
-        log_seqencer =  LogSeqEncoder(line_in_seq=line_in_seq, dense_neurons=embedding_size)
-        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, num_classes=self.num_classes)
+        if self.bglog is None or self.train_data is None or self.val_data is None:
+            self.train_data, self.val_data,  self.test_data, self.bglog = self.get_bgdata(**kwargs)
+        line_encoder = LogLineEncoder(self.bglog, chars_in_line=self.chars_in_line, char_embedding_size=self.char_embedding_size,)
+        log_seqencer =  LogSeqEncoder(line_in_seq=self.line_in_seq, dense_neurons=self.embedding_size, 
+                                      batch_normalize=self.batch_normalize)
+        ptmodel_arch = LogClassifier(line_encoder=line_encoder, seq_encoder=log_seqencer, 
+                                     num_classes=self.num_classes, batch_normalize=self.batch_normalize)
         # ptmodel_arch.compile(optimizer=pt_optimizer, loss=pt_loss, metrics=pt_metrics)
-        ptmodel_arch.compile(optimizer=pt_optimizer, metrics=pt_metrics) ###TODO: how to do this without metics defined here to be learned
-        self.tupdate({'char_embedding_size': char_embedding_size, 'pt_optimizer': pt_optimizer, 'num_classes': self.num_classes,
-                            'pt_loss': pt_loss}, **kwargs)
+        ptmodel_arch.compile(optimizer=self.pt_optimizer, metrics=self.pt_metrics) ###TODO: how to do this without metics defined here to be learned
+        self.tupdate({'char_embedding_size': self.char_embedding_size, 'pt_optimizer': self.pt_optimizer, 'num_classes': self.num_classes,
+                            'pt_loss': self.pt_loss}, **kwargs)
         return ptmodel_arch
     
+        
     
     def ptmodel_custom_train(self, **kwargs):
         '''
-        ###TODO:         
-        batch_normalize in model arch
+        ###TODO:
         integrate with oc train        
         pt_lr 
         save_model
         call the keras metric instead of custom evaluation
         '''
-        ################ setting the variables ##############################
+        ################ setting the variables ##############################        
         start_time = time.time()
-        bglog = kwargs.get('bglog')
-        train_data = kwargs.get('train_data')
-        val_data = kwargs.get('val_data')
-        embedding_size = kwargs.get('embedding_size', 16)
-        start_time = time.time()
-        ptmodel = self.get_ptmodel_arch(**kwargs)
-        ptmodel_name = kwargs.get('ptmodel_name', 'ptmodel')
-        monitor_metric = kwargs.get('monitor_metric', 'accuracy')
-        self.data_dir = kwargs.get('data_dir', self.data_dir)
-        self.save_dir = kwargs.get('save_dir', self.data_dir)
-        save_ptmodel = kwargs.get('save_ptmodel', True)
-        pt_wait = kwargs.get('pt_wait', 3)
-        pt_epochs = kwargs.get('pt_epochs', 5)
-        pt_early_stop = kwargs.get('pt_early_stop', False)
-        plot_ptmodel_centroid = kwargs.get('plot_ptmodel_centroid', True)
-        plot_ptmodel_scores = kwargs.get('plot_ptmodel_scores', True)
-        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
+        self._get_all_kwargs(**kwargs)
+        self.ptmodel = self._get_ptmodel_arch(**kwargs)
+        # train_data, val_data,  test_data, bglog = self.get_or_generate_dataset( **kwargs)
         print(datetime.datetime.now())
-        print('starting to create {} automatically'.format(ptmodel_name))
+        print('starting to create {} automatically'.format(self.ptmodel_name))
         curr_dt_time = datetime.datetime.now()
         model_name = self.ptmodel_name + '_' + str(curr_dt_time).replace(' ','_').replace(':','_') + '/'
         if not os.path.exists(self.save_dir):
             os.mkdir(self.save_dir)
         filepath = os.path.join(self.save_dir, model_name)                 
-        if val_data is not None:
+        if self.val_data is not None:
             monitor_metric = 'val_accuracy'
         ################ initializing the optimizer###############
         optimizer = tf.keras.optimizers.Adam()
@@ -450,31 +458,32 @@ class OpenSet:
         HIST = namedtuple("HIST", "history")  #### This will just act like hist.history object 
         ###################################################################################
         ###############EPOCH######################################
-        for epoch in range(pt_epochs):
+        for epoch in range(self.pt_epochs):
             step_loss = 0
             #########################BATCH############################
-            for step, (logseq_batch, label_batch) in enumerate(train_data):
+            for step, (logseq_batch, label_batch) in enumerate(self.train_data):
                 with tf.GradientTape() as tape:
                     ############pass the data and get feature at the same time #####################
-                    label_batch_pred = ptmodel(logseq_batch, training=True)
-                    batch_features = ptmodel.batch_features # Avoiding second call batch_features = ptmodel(logseq_batch, extract_feature=True)
+                    label_batch_pred = self.ptmodel(logseq_batch, training=True)
+                    batch_features = self.ptmodel.batch_features # Avoiding second call batch_features = ptmodel(logseq_batch, extract_feature=True)
                     #################### calling hypersphere volume minimization custom loss function #######################
                     batch_loss = self.hvm_loss(batch_features, label_batch, label_batch_pred, **kwargs)
                     step_loss += batch_loss
             ########### calculate gradient  of the weights and biases with respect to batch_loss ####################
-            gradients = tape.gradient(batch_loss, ptmodel.trainable_variables)
+            gradients = tape.gradient(batch_loss, self.ptmodel.trainable_variables)
             ########### apply gradient  on the weights and biases ####################
-            optimizer.apply_gradients(zip(gradients, ptmodel.trainable_variables))
+            optimizer.apply_gradients(zip(gradients, self.ptmodel.trainable_variables))
             ########## since the weights have been changed it is expected that the average loss for the epochs 
             batch_avg_loss = step_loss/step  #### total losses from all the batches in a epochs divided by the number of batches           
             ############################## Evaluate and display scores############################           
-            pt_f1_tr, pt_f1_val = self.pt_evlaluate_epoch(loss=batch_avg_loss, eval_for='pt', ptmodel=ptmodel,
-                                                          epoch=epoch, epochs=pt_epochs, **kwargs)
+            pt_f1_tr, pt_f1_val = self.pt_evlaluate_epoch(loss=batch_avg_loss, eval_for='pt', ptmodel=self.ptmodel,
+                                                          epoch=epoch, **kwargs)
+            wait = 0
             if (pt_f1_tr > self.best_pt_f1_tr) or (pt_f1_val > self.best_pt_f1_val):
                 wait = 0
                 if pt_f1_tr > self.best_pt_f1_tr:                
                     self.best_pt_f1_tr = pt_f1_tr
-                if val_data and pt_f1_val > self.best_pt_f1_val:
+                if self.val_data and pt_f1_val > self.best_pt_f1_val:
                     self.best_pt_f1_val = pt_f1_val
             else:    
                 wait += 1
@@ -482,9 +491,10 @@ class OpenSet:
                     print(f'train score not improving  going to wait state {wait}')
                 if pt_f1_val <= self.best_pt_f1_val:
                     print(f'val score not improving  going to wait state {wait}')                
-                if wait >= pt_wait:                    
+                if wait >= self.pt_wait:
+                    self.pt_epochs_end = pt_epoch
                     break
-            self.pt_epochs = pt_epochs            
+            # self.pt_epochs = pt_epochs            
             #########################################################################################            
             pt_losses.append(batch_avg_loss.numpy())
             pt_F1_score_train.append(pt_f1_tr)
@@ -493,33 +503,27 @@ class OpenSet:
                    'pt_F1_score_val': pt_F1_score_val}
         hist = HIST(history)
         pt_time = time.time() - start_time
-        self.tupdate({'ptmodel_name': ptmodel_name, 'data_dir': self.data_dir, 'save_ptmodel': save_ptmodel, 'pt_wait': pt_wait,
-                            'pt_epochs':pt_epochs,  'ptmodel_path': filepath,
+        self.tupdate({'ptmodel_name': self.ptmodel_name, 'data_dir': self.data_dir, 'save_ptmodel': self.save_ptmodel, 
+                      'pt_wait': self.pt_wait,   'pt_epochs': self.pt_epochs,  'ptmodel_path': filepath,
                      'pt_time': pt_time}, run_id_print=True, **kwargs)
-        if plot_ptmodel_scores:
+        if self.plot_ptmodel_scores:
             self.plot_pretrain_result(hist)
-        self.ptmodel = ptmodel  ###### This will ensurefeatures can be now obtained from the trained model without further training 
-        if plot_ptmodel_centroid:
+        # self.ptmodel = ptmodel  ###### This will ensurefeatures can be now obtained from the trained model without further training 
+        if self.plot_ptmodel_centroid:
             _, _ = self.extract_features_and_centroids(**kwargs)
             # print(f'loss: {batch_avg_loss}')
             
             
-    def pt_evlaluate_epoch(self, loss=0, eval_for='pt', ptmodel=None, epoch=1, epochs=1, **kwargs):
-        train_data = kwargs.get('train_data')
-        val_data = kwargs.get('val_data')       
-        eval_score_train, train_acc = self.pt_evaluate(train_data,  ptmodel=ptmodel, debug=False,)
-        eval_score_train  = round(eval_score_train, 4)        
-        if eval_for == 'pt':
-            loss = loss
-        else:
-            loss = loss.numpy()
-        if val_data:
-            eval_score_val, val_acc= self.pt_evaluate(val_data,  ptmodel=ptmodel, debug=False)
+    def pt_evlaluate_epoch(self, loss=0, ptmodel=None, epoch=1, **kwargs):       
+        eval_score_train, train_acc = self.pt_evaluate(self.train_data,  ptmodel=ptmodel, debug=False,)
+        eval_score_train  = round(eval_score_train, 4)      
+        if self.val_data:
+            eval_score_val, val_acc= self.pt_evaluate(self.val_data,  ptmodel=ptmodel, debug=False)
             eval_score_val  = round(eval_score_val, 4)            
-            print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train} '
+            print(f'epoch: {epoch+1}/{self.pt_epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train} '
                   f'val_loss: {loss}, val_acc: {val_acc},, F1_val: {eval_score_val}')
         else:
-            print(f'epoch: {epoch+1}/{epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train}')        
+            print(f'epoch: {epoch+1}/{self.pt_epochs}, train_loss: {loss}, train_acc: {train_acc}, F1_train: {eval_score_train}')        
         return eval_score_train, eval_score_val
     
     
@@ -626,6 +630,38 @@ class OpenSet:
         return ptmodel, hist, filepath
     
     
+    def extract_features_and_centroids(self, **kwargs):
+        store_features = kwargs.get('store_features', True)
+        train_data, val_data,  test_data, bglog = self.get_or_generate_dataset(**kwargs)
+        self.centroids = self.centroids_cal(train_data, **kwargs)        
+        feature_from = kwargs.get('store_features', 'train_data')        
+        if feature_from == 'val_data':
+            data = val_data
+        elif feature_from == 'test_data':
+            data = test_data
+        else:
+            data = train_data
+        total_features, total_preds, total_labels = [], [], []
+        for batch in data:
+            logseq_batch, label_batch = batch
+            features_batch = self.get_pretrained_features(logseq_batch, **kwargs)
+            label_indexs = tf.math.argmax(label_batch, axis=1)
+            label_index_np = label_indexs.numpy()
+            total_labels.append(label_index_np)
+            total_features.append(features_batch)
+        # y_pred = np.array(total_preds).flatten().tolist()
+        y_true = np.array(total_labels).flatten().tolist()
+        if store_features:
+            # self.total_preds = y_pred
+            self.total_labels = y_true
+            total_features = np.array(total_features)
+            total_features = np.reshape(total_features, ((total_features.shape[0] * total_features.shape[1]), total_features.shape[2])    ) 
+        self.total_features = total_features
+        self.plot_centroids(**kwargs)
+        self.tupdate({'feature_from': feature_from}, run_id_print=True,  **kwargs)
+        return total_features, total_labels
+    
+    ##################################  GENERATE DATA #########################################################################
     def get_or_generate_dataset(self, **kwargs):
         bg_class_obj = kwargs.get('bg_class_obj', BGLog)
         bglog = kwargs.get('bglog')
@@ -645,34 +681,35 @@ class OpenSet:
       
     
     def get_bgdata(self, **kwargs ):
-        bg_class_obj = kwargs.get('bg_class_obj')
-        bglog = bg_class_obj(**kwargs)
-        train_test = bglog.get_tensor_train_val_test(**kwargs)
-        train_data, val_data,  test_data = train_test
-        num_classes = kwargs.get('num_classes', train_data.element_spec[1].shape[1])
-        self.num_classes = num_classes
-        print(f'get_bgdata  num_classses: {num_classes} and self.num_classes: {self.num_classes}' )
-        bs = train_data.element_spec[0].shape[0]
-        seql = train_data.element_spec[0].shape[1]
-        chars = train_data.element_spec[0].shape[2]        
+        self._get_all_kwargs(**kwargs)
+        if self.bglog is None or self.train_data is None or self.val_data is None or self.test_data is None:
+            bg_class_obj = kwargs.get('bg_class_obj')
+            self.bglog = bg_class_obj(**kwargs)
+            train_test = self.bglog.get_tensor_train_val_test(**kwargs)
+            self.train_data, self.val_data,  self.test_data = train_test
+            self.num_classes = kwargs.get('num_classes', self.train_data.element_spec[1].shape[1])            
+        print(f'get_bgdata  num_classses: {self.num_classes} and self.num_classes: {self.num_classes}' )
+        bs = self.train_data.element_spec[0].shape[0]
+        seql = self.train_data.element_spec[0].shape[1]
+        chars = self.train_data.element_spec[0].shape[2]        
         self.tupdate({'batch_size': bs, 'padded_seq_len':seql, 'padded_char_len': chars, 
-                             'logpath': bglog.logfile, 
-                             'logfilename': bglog.logfilename, 
-                             'pkl_file': bglog.full_pkl_path, 
-                             'tk_file': bglog.tk_path, 
-                             'load_from_pkl': bglog.load_from_pkl, 
-                             'train_ratio': bglog.train_ratio, 
-                             'ablation': bglog.ablation, 
-                             'save_dir': bglog.save_dir, 
-                             'designated_ukc_cls': bglog.designated_ukc_cls,
-                             'clean_part_1': bglog.clean_part_1,
-                             'clean_part_2': bglog.clean_part_2,
-                             'clean_time_1': bglog.clean_time_1,
-                             'clean_part_4': bglog.clean_part_4,
-                             'clean_time_2': bglog.clean_time_2,
-                             'clean_part_6': bglog.clean_part_6,
+                             'logpath': self.bglog.logfile, 
+                             'logfilename': self.bglog.logfilename, 
+                             'pkl_file': self.bglog.full_pkl_path, 
+                             'tk_file': self.bglog.tk_path, 
+                             'load_from_pkl': self.bglog.load_from_pkl, 
+                             'train_ratio': self.bglog.train_ratio, 
+                             'ablation': self.bglog.ablation, 
+                             'save_dir': self.bglog.save_dir, 
+                             'designated_ukc_cls': self.bglog.designated_ukc_cls,
+                             'clean_part_1': self.bglog.clean_part_1,
+                             'clean_part_2': self.bglog.clean_part_2,
+                             'clean_time_1': self.bglog.clean_time_1,
+                             'clean_part_4': self.bglog.clean_part_4,
+                             'clean_time_2': self.bglog.clean_time_2,
+                             'clean_part_6': self.bglog.clean_part_6,
                              }, **kwargs)
-        return train_data, val_data,  test_data, bglog
+        return self.train_data, self.val_data,  self.test_data, self.bglog
         
         
     def get_optimizer(self, optimizer, lr_rate=None):        

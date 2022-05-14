@@ -203,15 +203,15 @@ class OpenSet:
             for batch in tqdm(self.train_data):                
                 logseq_batch, label_batch = batch ## (32, 32, 64), (32, 4)
                 #### get the current batch loss and radius
-                current_batch_loss, current_batch_radius = self.train_step(lossfunction, 
-                                                     logseq_batch, label_batch, self.oc_optimizer_obj)
+                current_batch_loss, current_batch_radius = self.train_step(lossfunction, logseq_batch, 
+                                                                           label_batch, self.oc_optimizer_obj)
                 ##### keep the current radius if loss is reducing otherwise discard
                 if current_batch_loss < least_batch_loss:
                     best_batch_radius = current_batch_radius
                     least_batch_loss = current_batch_loss
                 ### Optinal : can be used for average radius for the epoch
                 all_batch_radius_total += current_batch_radius  
-                ### add loss to the epoch total 
+                ## add loss to the epoch total 
                 epoch_loss += current_batch_loss
                 steps_in_epoch += 1
             ### assign the best_batch_radius to self.radius, which can be evaluated w.r.t F1 score later
@@ -222,7 +222,7 @@ class OpenSet:
             self.radius_changes.append(self.best_epoch_radius)
             ### optional for avg radius over the epoch
             self.epoch_avg_radius = all_batch_radius_total / steps_in_epoch            
-            ######don't store the feature with this evaluate instead use the feature extracted during centroid and feature extraction before for loop
+            ################################ EVALUATE ##############################
             _, _, eval_score_train, _ = self.evaluate(self.train_data, debug=False,)
             self.f1_tr_lst.append(round(eval_score_train, 4))
             if self.val_data:
@@ -233,15 +233,18 @@ class OpenSet:
             else:
                 print(f'epoch: {epoch+1}/{self.oc_epochs}, train_loss: {loss.numpy()}, F1_train: {eval_score_train}')
             ###################################################################################################    
-            ####### self.best_epoch_radius will be evaluated here against the f1 score. ########################
+            ####### self.radius will be evaluated here against the f1 score. ########################
             if (eval_score_train > self.best_train_score) or (eval_score_val > self.best_val_score):
                 wait = 0
                 if eval_score_train > self.best_train_score:                
                     self.best_train_score = eval_score_train
                 if self.val_data and eval_score_val > self.best_val_score:
                     self.best_val_score = eval_score_val
-                best_radius = self.best_epoch_radius
-                # best_centroids = self.centroids                
+                ##################### We have three thighs ##########     
+                best_radius = self.best_epoch_radius   #### which is  current_batch_radius taken at minimum loss
+                # best_radius = self.epoch_avg_radius      #### summation of all current_batch_radius
+                # best_radius = current_batch_radius     #### the last batch, which possibly has grown due to gradient and softplus
+                # best_radius = self.radius     #### self.radius should be same as current_batch_radius , but let see 
             else:    
                 wait += 1
                 if eval_score_train <= self.best_train_score:
@@ -283,10 +286,14 @@ class OpenSet:
         with tf.GradientTape() as tape:                
             # features_batch = self.model(logseq_batch, extract_feature=True)
             features_batch = self.get_pretrained_features(logseq_batch)
-            loss, self.radius = Lfunction(features_batch, self.centroids, label_batch)        
-            gradients = tape.gradient(loss, [self.radius])
-            optimizer.apply_gradients(zip(gradients, [self.radius]))
-        return loss, self.radius
+            # loss, self.radius = Lfunction(features_batch, self.centroids, label_batch) 
+            loss, radius = Lfunction(features_batch, self.centroids, label_batch)
+            # gradients = tape.gradient(loss, [self.radius])
+            # optimizer.apply_gradients(zip(gradients, [self.radius]))
+            gradients = tape.gradient(loss, [radius])
+            optimizer.apply_gradients(zip(gradients, [radius]))
+        # return loss, self.radius
+        return loss, radius
     
         
     def centroids_cal(self, data, **kwargs):

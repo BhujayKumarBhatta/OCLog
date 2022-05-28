@@ -187,9 +187,11 @@ class OpenSet:
         #### expecting to store the feature of test data and test labels with open set classes 
         print('classification report for test data:')
         ##### hence store_features is true and plotting the centroid with the test features and test labels
-        _, _, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=self.designated_ukc_cls, store_features=True)
+        y_true, y_pred, f1_weighted, f_measure = self.evaluate(test_data, ukc_label=self.designated_ukc_cls, store_features=True)
+        print(f'before plot .....total_label: {len(y_true)}, total_preds: {len(y_pred)}')
         centroid_plot_start = time.time()
         self.plot_centroids(use_labels=self.total_preds, **kwargs)
+        print(f'after plot ....total_label: {len(y_true)}, total_preds: {len(y_pred)}')
         centroid_plot_time = time.time() - centroid_plot_start
         total_oc_time = time.time() - start_time
         self.tracker.update({'oc_epochs': oc_epochs, 'oc_wait': oc_wait, 'oc_lr': oc_lr, 'oc_optimizer': oc_optimizer,
@@ -307,24 +309,31 @@ class OpenSet:
         #     self.ukc_label = ukc_label
         total_features, total_preds, total_labels = [], [], []
         num_samples = 0
+        num_batches = 0
         for batch in data:
-            logseq_batch, label_batch = batch
-            features_batch = self.get_pretrained_features(logseq_batch)
-            # print('first feature batch within evaluate: ', features_batch[0][0])            
-            preds_np = self.openpredict(features_batch, debug=False)
-            total_preds.append(preds_np)
-            total_features.append(features_batch)
-            
+            logseq_batch, label_batch = batch            
+            # print('first feature batch within evaluate: ', features_batch[0][0])
+            if kwargs.get('ptmodel_eval') is True:
+                preds_np = self.ptmodel.predict(logseq_batch)
+            else:
+                features_batch = self.get_pretrained_features(logseq_batch)
+                preds_np = self.openpredict(features_batch, debug=False)
+                total_features.append(features_batch)
+                total_preds.append(preds_np)
             label_indexs = tf.math.argmax(label_batch, axis=1)
             label_index_np = label_indexs.numpy()
             total_labels.append(label_index_np)
-            
             num_samples += 1
-        
+            num_batches += 1
+        # print(f'number of batches in the data: {num_batches}')
+        # print(f'before flattening, total_preds: {total_preds[0]} and y_true: {y_true[0]}')
+        # print(f'before flattening, total_preds: {total_preds[0]}')
+        # print(f'before flattening, total_labels shape: {np.array(total_preds).shape}, total_label len: {len(np.array(total_preds))}')
         y_pred = np.array(total_preds).flatten().tolist()        
         y_true = np.array(total_labels).flatten().tolist()
-        
+        # print(f'after flattening, y_pred: {len(y_pred)} and y_true: {len(y_true)}')        
         if store_features:
+            self.total_labels = y_true
             self.total_preds = y_pred
             total_features = np.array(total_features)
             total_features = np.reshape(total_features, ((total_features.shape[0] * total_features.shape[1]), total_features.shape[2])    ) 

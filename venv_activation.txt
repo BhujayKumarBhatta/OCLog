@@ -1,0 +1,3 @@
+C:\Users\Bhujay_ROG\venv1\Scripts\activate
+jupyter lab
+

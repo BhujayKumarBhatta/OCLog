@@ -686,7 +686,8 @@ class OpenSet:
             # filtered_fixed_color_map[last_index] = 'red'
             print('the color map for the classes, here index postion are the class number:', filtered_fixed_color_map )
             ccolor = np.array([i for i in  range(len(centroids))])
-            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')
+            ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[:self.num_classes], cmap='tab10', marker=r'd', edgecolors= 'k')
+            # ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c=fixed_color_maps[ccolor], cmap='tab10', marker=r'd', edgecolors= 'k')
         elif manual_color_map and centroid_black:            
             ax5.scatter(scaled_cout[:, 0], scaled_cout[:, -1],  s=200, c='black', cmap='tab10', marker=r'd', edgecolors= 'k')
         else:
